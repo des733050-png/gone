@@ -9,6 +9,18 @@ import { Avatar } from '../../atoms/Avatar';
 import { Icon } from '../../atoms/Icon';
 import { ScreenContainer } from '../../organisms/ScreenContainer';
 import { getAppointments, getPrescriptions, getLabResults } from '../../api';
+import { ROLE_LABELS } from '../../config/roles';
+import { isOwnDataOnly, getAllowedPages } from '../../config/roles';
+
+// Quick-action items gated by role
+const QUICK_ACTIONS = [
+  { icon: { lib:'feather', name:'calendar' },            label:'Schedule',  page:'appointments', roles:['hospital_admin','doctor','receptionist'] },
+  { icon: { lib:'mc',      name:'pill' },                label:'Pharmacy',  page:'pharmacy',     roles:['hospital_admin','doctor','lab_manager'] },
+  { icon: { lib:'mc',      name:'file-document-outline'},label:'EMR',       page:'emr',          roles:['hospital_admin','doctor'] },
+  { icon: { lib:'mc',      name:'flask-outline' },       label:'Lab',       page:'lab',          roles:['hospital_admin','doctor','lab_manager'] },
+  { icon: { lib:'feather', name:'dollar-sign' },         label:'Billing',   page:'billing',      roles:['hospital_admin','billing_manager'] },
+  { icon: { lib:'feather', name:'users' },               label:'Staff',     page:'staff',        roles:['hospital_admin'] },
+];
 
 export function DashboardScreen({ user, goTo }) {
   const { C } = useTheme();
@@ -17,18 +29,44 @@ export function DashboardScreen({ user, goTo }) {
   const [prescriptions, setPrescriptions] = useState([]);
   const [labs, setLabs] = useState([]);
 
+  const ownOnly = isOwnDataOnly(user?.role);
+
   useEffect(() => {
     let m = true;
     Promise.all([getAppointments(), getPrescriptions(), getLabResults()]).then(([a, p, l]) => {
-      if (m) { setAppointments(a || []); setPrescriptions(p || []); setLabs(l || []); }
+      if (!m) return;
+      if (ownOnly) {
+        setAppointments((a || []).filter(x => x.doctor_id === user?.id));
+        setPrescriptions((p || []).filter(x => x.doctor_id === user?.id));
+        setLabs((l || []).filter(x => x.doctor_id === user?.id));
+      } else {
+        setAppointments(a || []);
+        setPrescriptions(p || []);
+        setLabs(l || []);
+      }
     });
     return () => { m = false; };
-  }, []);
+  }, [user]);
 
-  const criticalLabs   = labs.filter((l) => l.critical);
-  const pendingRx      = prescriptions.filter((p) => p.status === 'pending_dispatch');
-  const todayApts      = appointments.filter((a) => a.date === 'Today');
-  const statBasis      = cardColumns >= 3 ? '32%' : cardColumns >= 2 ? '48%' : '100%';
+  const criticalLabs = labs.filter((l) => l.critical);
+  const pendingRx    = prescriptions.filter((p) => p.status === 'pending_dispatch');
+  const todayApts    = appointments.filter((a) => a.date === 'Today');
+  const unassigned   = appointments.filter((a) => a.status === 'unassigned');
+  const statBasis    = cardColumns >= 3 ? '32%' : cardColumns >= 2 ? '48%' : '100%';
+  const allowedPages = getAllowedPages(user?.role);
+
+  // Stats visible per role
+  const allStats = [
+    { icon:'calendar',     lib:'feather', label:"Today's appointments", value: todayApts.length,    color:C.primary, bg:C.primaryLight, page:'appointments', roles:['hospital_admin','doctor','receptionist'] },
+    { icon:'pill',         lib:'mc',      label:'Pending Rx dispatch',  value: pendingRx.length,    color:C.warning, bg:C.warningLight, page:'pharmacy',     roles:['hospital_admin','doctor','lab_manager'] },
+    { icon:'flask-outline',lib:'mc',      label:'Critical lab flags',   value: criticalLabs.length, color:C.danger,  bg:C.dangerLight,  page:'lab',          roles:['hospital_admin','doctor','lab_manager'] },
+    { icon:'alert-circle', lib:'feather', label:'Unassigned appts',     value: unassigned.length,   color:C.danger,  bg:C.dangerLight,  page:'appointments', roles:['hospital_admin','receptionist'] },
+    { icon:'dollar-sign',  lib:'feather', label:'Pending invoices',     value: 2,                   color:C.warning, bg:C.warningLight, page:'billing',      roles:['hospital_admin','billing_manager'] },
+    { icon:'users',        lib:'feather', label:'Total patients',       value: 4,                   color:C.success, bg:C.successLight, page:'emr',          roles:['hospital_admin','doctor'] },
+  ];
+
+  const visibleStats = allStats.filter(s => s.roles.includes(user?.role) && allowedPages.includes(s.page));
+  const visibleActions = QUICK_ACTIONS.filter(a => a.roles.includes(user?.role) && allowedPages.includes(a.page));
 
   return (
     <ScreenContainer scroll>
@@ -37,139 +75,103 @@ export function DashboardScreen({ user, goTo }) {
         <View style={styles.heroDecor1} />
         <View style={styles.heroDecor2} />
         <View style={styles.heroTop}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.heroGreeting}>Good morning 👋</Text>
             <Text style={styles.heroName}>{user.first_name} {user.last_name}</Text>
-            <Text style={styles.heroSub}>{user.specialty} · {user.facility}</Text>
-            <Text style={styles.heroLicense}>Lic: {user.license}</Text>
+            <Text style={styles.heroSub}>{user.specialty || ROLE_LABELS[user.role]} · {user.facility}</Text>
+            {user.license && <Text style={styles.heroLicense}>Lic: {user.license}</Text>}
+            <View style={[styles.rolePill, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{ROLE_LABELS[user.role]}</Text>
+            </View>
           </View>
           <Avatar name={`${user.first_name} ${user.last_name}`} size={52} />
         </View>
-        <View style={styles.heroActions}>
-          {[
-            { icon: { lib:'feather',name:'calendar'    }, label:'Schedule',  page:'appointments' },
-            { icon: { lib:'mc',     name:'pill'        }, label:'Pharmacy',  page:'pharmacy'     },
-            { icon: { lib:'mc',     name:'file-document-outline' }, label:'EMR', page:'emr'      },
-            { icon: { lib:'mc',     name:'flask-outline'}, label:'Lab',      page:'lab'          },
-          ].map((a) => (
-            <Btn key={a.label} label={a.label}
-              icon={<Icon name={a.icon.name} lib={a.icon.lib} size={16} color="#fff" />}
-              onPress={() => goTo(a.page)} size="sm" variant="white" style={styles.heroBtn} />
-          ))}
-        </View>
+        {visibleActions.length > 0 && (
+          <View style={styles.heroActions}>
+            {visibleActions.map((a) => (
+              <Btn key={a.label} label={a.label}
+                icon={<Icon name={a.icon.name} lib={a.icon.lib} size={16} color="#fff" />}
+                onPress={() => goTo(a.page)} size="sm" variant="white" style={styles.heroBtn} />
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Stats */}
-      <View style={styles.statsRow}>
-        {[
-          { icon:'calendar',  lib:'feather', label:"Today's Appointments", value: todayApts.length,          color:C.primary,  bg:C.primaryLight,  page:'appointments' },
-          { icon:'pill',      lib:'mc',      label:'Pending Rx Dispatch',  value: pendingRx.length,          color:C.warning,  bg:C.warningLight,  page:'pharmacy' },
-          { icon:'flask-outline',lib:'mc',   label:'Critical Lab Flags',   value: criticalLabs.length,       color:C.danger,   bg:C.dangerLight,   page:'lab' },
-          { icon:'users',     lib:'feather', label:'Total Patients',       value: 4,                         color:C.success,  bg:C.successLight,  page:'emr' },
-        ].map((s) => (
-          <Card key={s.label} hover onPress={() => goTo(s.page)} style={[styles.statCard, { flexBasis: statBasis }]}>
-            <View style={[styles.statIcon, { backgroundColor: s.bg }]}>
-              <Icon name={s.icon} lib={s.lib} size={20} color={s.color} />
-            </View>
-            <Text style={[styles.statValue, { color: C.text }]}>{s.value}</Text>
-            <Text style={[styles.statLabel, { color: C.textMuted }]}>{s.label}</Text>
-          </Card>
-        ))}
-      </View>
-
-      {/* Critical alerts */}
-      {criticalLabs.length > 0 && (
-        <Card style={[styles.alertCard, { borderColor: `${C.danger}60`, backgroundColor: C.dangerLight }]}>
-          <View style={styles.alertHeader}>
-            <Icon name="alert-circle" lib="feather" size={18} color={C.danger} />
-            <Text style={[styles.alertTitle, { color: C.danger }]}> {criticalLabs.length} Critical Lab Result{criticalLabs.length > 1 ? 's' : ''}</Text>
-          </View>
-          {criticalLabs.map((l) => (
-            <Text key={l.id} style={[styles.alertItem, { color: C.danger }]}>• {l.patient} — {l.test}: {l.result}</Text>
-          ))}
-          <Btn label="Review Lab Results" onPress={() => goTo('lab')} variant="danger" size="sm" style={{ alignSelf: 'flex-start', marginTop: 8 }} />
-        </Card>
-      )}
-
-      {/* Today appointments */}
-      <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: C.text }]}>📅 Today's Schedule</Text>
-        <Btn label="Full Schedule" onPress={() => goTo('appointments')} variant="ghost" size="sm" />
-      </View>
-      {todayApts.map((a) => (
-        <Card key={a.id} hover style={styles.aptCard}>
-          <View style={styles.aptRow}>
-            <View style={[styles.aptAvatar, { backgroundColor: C.primaryLight }]}>
-              <Icon name="account" lib="mc" size={22} color={C.primary} />
-            </View>
-            <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={[styles.aptPatient, { color: C.text }]}>{a.patient}</Text>
-              <Text style={[styles.aptReason, { color: C.textMuted }]}>{a.reason}</Text>
-              <Text style={[styles.aptTime, { color: C.primary }]}>⏰ {a.time} · {a.type}</Text>
-            </View>
-            <Badge label={a.status} color={a.status === 'confirmed' ? 'success' : 'warning'} />
-          </View>
-        </Card>
-      ))}
-
-      {/* Pending Rx */}
-      {pendingRx.length > 0 && (
-        <>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: C.text }]}>💊 Pending Rx Dispatch</Text>
-            <Btn label="View All" onPress={() => goTo('pharmacy')} variant="ghost" size="sm" />
-          </View>
-          {pendingRx.slice(0, 2).map((rx) => (
-            <Card key={rx.id} hover style={styles.rxCard}>
-              <View style={styles.rxRow}>
-                <View style={[styles.rxIcon, { backgroundColor: C.warningLight }]}>
-                  <Icon name="pill" lib="mc" size={20} color={C.warning} />
-                </View>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={[styles.rxDrug, { color: C.text }]}>{rx.drug}</Text>
-                  <Text style={[styles.rxPatient, { color: C.textMuted }]}>{rx.patient} · {rx.instructions}</Text>
-                </View>
-                <Badge label="Pending" color="warning" />
+      {visibleStats.length > 0 && (
+        <View style={styles.statsRow}>
+          {visibleStats.map((s) => (
+            <Card key={s.label} hover onPress={() => goTo(s.page)} style={[styles.statCard, { flexBasis: statBasis }]}>
+              <View style={[styles.statIcon, { backgroundColor: s.bg }]}>
+                <Icon name={s.icon} lib={s.lib} size={20} color={s.color} />
               </View>
+              <Text style={[styles.statValue, { color: C.text }]}>{s.value}</Text>
+              <Text style={[styles.statLabel, { color: C.textMuted }]}>{s.label}</Text>
             </Card>
           ))}
-        </>
+        </View>
+      )}
+
+      {/* Critical alerts */}
+      {criticalLabs.length > 0 && allowedPages.includes('lab') && (
+        <View style={{ marginBottom: 16 }}>
+          <Text style={[styles.sectionTitle, { color: C.text }]}>Critical lab flags</Text>
+          {criticalLabs.map((l) => (
+            <View key={l.id} style={[styles.alertRow, { backgroundColor: C.dangerLight, borderColor: C.danger }]}>
+              <Icon name="alert-circle" lib="feather" size={16} color={C.danger} style={{ marginRight: 10 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: C.danger, fontWeight: '700', fontSize: 13 }}>{l.patient}</Text>
+                <Text style={{ color: C.danger, fontSize: 12 }}>{l.test}: {l.result}</Text>
+              </View>
+              <Btn label="Review" size="sm" variant="ghost" onPress={() => goTo('lab')} />
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Recent appointments */}
+      {todayApts.length > 0 && allowedPages.includes('appointments') && (
+        <View style={{ marginBottom: 16 }}>
+          <Text style={[styles.sectionTitle, { color: C.text }]}>
+            {ownOnly ? "Your appointments today" : "Today's appointments"}
+          </Text>
+          {todayApts.slice(0, 3).map((a) => (
+            <Card key={a.id} hover style={styles.aptRow} onPress={() => goTo('appointments')}>
+              <View style={[styles.aptAvatar, { backgroundColor: C.primaryLight }]}>
+                <Icon name="account" lib="mc" size={18} color={C.primary} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={{ color: C.text, fontWeight: '600', fontSize: 13 }}>{a.patient}</Text>
+                <Text style={{ color: C.textMuted, fontSize: 11 }}>{a.time} · {a.type}</Text>
+              </View>
+              <Badge label={a.status} color={a.status === 'confirmed' ? 'success' : 'warning'} />
+            </Card>
+          ))}
+        </View>
       )}
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: { borderRadius: 18, padding: 20, marginBottom: 16, overflow: 'hidden', position: 'relative' },
-  heroDecor1: { position: 'absolute', right: -30, top: -30, width: 130, height: 130, borderRadius: 65, backgroundColor: 'rgba(255,255,255,0.08)' },
-  heroDecor2: { position: 'absolute', right: 50, bottom: -40, width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.06)' },
-  heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  heroGreeting: { color: 'rgba(255,255,255,0.82)', fontSize: 13, fontWeight: '500' },
-  heroName: { color: '#fff', fontSize: 22, fontWeight: '800', marginTop: 2 },
-  heroSub: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 2 },
-  heroLicense: { color: 'rgba(255,255,255,0.55)', fontSize: 10, marginTop: 2 },
-  heroActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  heroBtn: { marginRight: 4, marginBottom: 4 },
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16 },
-  statCard: { padding: 14, flex: 1, minWidth: 130 },
-  statIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  statValue: { fontSize: 24, fontWeight: '900', marginBottom: 2 },
-  statLabel: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  alertCard: { borderWidth: 2, borderRadius: 14, padding: 14, marginBottom: 14 },
-  alertHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  alertTitle: { fontSize: 15, fontWeight: '700' },
-  alertItem: { fontSize: 13, marginBottom: 3 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, marginTop: 4 },
-  sectionTitle: { fontSize: 16, fontWeight: '700' },
-  aptCard: { marginBottom: 10, padding: 12 },
-  aptRow: { flexDirection: 'row', alignItems: 'center' },
-  aptAvatar: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  aptPatient: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  aptReason: { fontSize: 12, marginBottom: 2 },
-  aptTime: { fontSize: 12, fontWeight: '600' },
-  rxCard: { marginBottom: 8, padding: 12 },
-  rxRow: { flexDirection: 'row', alignItems: 'center' },
-  rxIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  rxDrug: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  rxPatient: { fontSize: 12 },
+  hero:         { borderRadius: 16, padding: 20, marginBottom: 20, overflow: 'hidden' },
+  heroDecor1:   { position:'absolute', width:140, height:140, borderRadius:70, backgroundColor:'rgba(255,255,255,0.07)', top:-40, right:-20 },
+  heroDecor2:   { position:'absolute', width:90,  height:90,  borderRadius:45, backgroundColor:'rgba(255,255,255,0.05)', bottom:-20, left:40 },
+  heroTop:      { flexDirection:'row', alignItems:'flex-start', marginBottom:16 },
+  heroGreeting: { color:'rgba(255,255,255,0.75)', fontSize:13, marginBottom:4 },
+  heroName:     { color:'#fff', fontSize:20, fontWeight:'800', marginBottom:2 },
+  heroSub:      { color:'rgba(255,255,255,0.75)', fontSize:12, marginBottom:2 },
+  heroLicense:  { color:'rgba(255,255,255,0.55)', fontSize:11 },
+  rolePill:     { marginTop:8, alignSelf:'flex-start', paddingHorizontal:10, paddingVertical:3, borderRadius:99 },
+  heroActions:  { flexDirection:'row', flexWrap:'wrap', gap:8 },
+  heroBtn:      { marginRight:0 },
+  statsRow:     { flexDirection:'row', flexWrap:'wrap', gap:12, marginBottom:20 },
+  statCard:     { padding:14, alignItems:'flex-start' },
+  statIcon:     { width:40, height:40, borderRadius:10, alignItems:'center', justifyContent:'center', marginBottom:10 },
+  statValue:    { fontSize:24, fontWeight:'800', marginBottom:2 },
+  statLabel:    { fontSize:12 },
+  sectionTitle: { fontSize:15, fontWeight:'700', marginBottom:10 },
+  alertRow:     { flexDirection:'row', alignItems:'center', borderWidth:1, borderRadius:10, padding:12, marginBottom:8 },
+  aptRow:       { flexDirection:'row', alignItems:'center', padding:12, marginBottom:8 },
+  aptAvatar:    { width:36, height:36, borderRadius:10, alignItems:'center', justifyContent:'center' },
 });

@@ -1,0 +1,1 @@
+export { HospitalOnboardingScreen } from './HospitalOnboardingScreen';

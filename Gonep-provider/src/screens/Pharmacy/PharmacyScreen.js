@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../../theme/ThemeContext';
 import { Card } from '../../atoms/Card';
@@ -6,74 +6,45 @@ import { Badge } from '../../atoms/Badge';
 import { Btn } from '../../atoms/Btn';
 import { Icon } from '../../atoms/Icon';
 import { ScreenContainer } from '../../organisms/ScreenContainer';
-import { getPrescriptions, dispatchPrescription } from '../../api';
+import { MOCK_PRESCRIPTIONS } from '../../mock/data';
+import { isOwnDataOnly } from '../../config/roles';
 
-export function PharmacyScreen() {
+export function PharmacyScreen({ user }) {
   const { C } = useTheme();
-  const [prescriptions, setPrescriptions] = useState([]);
-  const [dispatching, setDispatching]     = useState(null);
+  const ownOnly = isOwnDataOnly(user?.role);
+  const prescriptions = ownOnly
+    ? MOCK_PRESCRIPTIONS.filter(p => p.doctor_id === user?.id)
+    : MOCK_PRESCRIPTIONS;
 
-  useEffect(() => { getPrescriptions().then((d) => setPrescriptions(d || [])); }, []);
-
-  const handleDispatch = async (id) => {
-    setDispatching(id);
-    const updated = await dispatchPrescription(id);
-    setPrescriptions((p) => p.map((x) => x.id === id ? { ...x, status: 'dispatched' } : x));
-    setDispatching(null);
-  };
-
-  const statusColor = { pending_dispatch: 'warning', dispatched: 'success', cancelled: 'danger' };
-  const statusLabel = { pending_dispatch: 'Pending Dispatch', dispatched: 'Dispatched', cancelled: 'Cancelled' };
+  const statusColor = (s) => s === 'dispatched' ? 'success' : 'warning';
 
   return (
     <ScreenContainer scroll>
-      {/* Summary */}
-      <View style={styles.summaryRow}>
-        {[
-          { label: 'Pending',    value: prescriptions.filter((p) => p.status === 'pending_dispatch').length, color: C.warning,  bg: C.warningLight, icon: 'clock' },
-          { label: 'Dispatched', value: prescriptions.filter((p) => p.status === 'dispatched').length,       color: C.success,  bg: C.successLight, icon: 'check-circle' },
-        ].map((s) => (
-          <Card key={s.label} style={[styles.summaryCard, { flex: 1 }]}>
-            <View style={[styles.summaryIcon, { backgroundColor: s.bg }]}>
-              <Icon name={s.icon} lib="feather" size={20} color={s.color} />
-            </View>
-            <Text style={[styles.summaryValue, { color: C.text }]}>{s.value}</Text>
-            <Text style={[styles.summaryLabel, { color: C.textMuted }]}>{s.label}</Text>
-          </Card>
-        ))}
-      </View>
-
-      {prescriptions.map((rx) => (
-        <Card key={rx.id} style={styles.rxCard}>
-          <View style={styles.rxHeader}>
-            <View style={[styles.rxIcon, { backgroundColor: C.warningLight }]}>
-              <Icon name="pill" lib="mc" size={22} color={C.warning} />
+      {ownOnly && (
+        <View style={[styles.scopeNote, { backgroundColor: C.primaryLight, borderColor: C.primaryMid }]}>
+          <Icon name="shield" lib="feather" size={13} color={C.primary} style={{ marginRight: 6 }} />
+          <Text style={{ color: C.primary, fontSize: 12 }}>Showing your prescriptions only</Text>
+        </View>
+      )}
+      {prescriptions.map(rx => (
+        <Card key={rx.id} style={styles.card}>
+          <View style={styles.row}>
+            <View style={[styles.icon, { backgroundColor: C.primaryLight }]}>
+              <Icon name="pill" lib="mc" size={20} color={C.primary} />
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={[styles.rxId, { color: C.textMuted }]}>{rx.id}</Text>
-              <Text style={[styles.rxDrug, { color: C.text }]}>{rx.drug}</Text>
-              <Text style={[styles.rxInstructions, { color: C.textSec }]}>{rx.instructions} · Qty: {rx.qty}</Text>
+              <Text style={[styles.drug, { color: C.text }]}>{rx.drug}</Text>
+              <Text style={[styles.sub, { color: C.textSec }]}>{rx.patient} · {rx.qty} {rx.qty === 1 ? 'unit' : 'units'}</Text>
+              <Text style={[styles.inst, { color: C.textMuted }]}>{rx.instructions} · {rx.date}</Text>
             </View>
-            <Badge label={statusLabel[rx.status] || rx.status} color={statusColor[rx.status] || 'primary'} />
-          </View>
-          <View style={[styles.rxMeta, { backgroundColor: C.bg }]}>
-            <View style={styles.rxMetaItem}>
-              <Icon name="account" lib="mc" size={13} color={C.textMuted} style={{ marginRight: 4 }} />
-              <Text style={[styles.rxMetaText, { color: C.textSec }]}>{rx.patient}</Text>
-            </View>
-            <View style={styles.rxMetaItem}>
-              <Icon name="clock" lib="feather" size={13} color={C.textMuted} style={{ marginRight: 4 }} />
-              <Text style={[styles.rxMetaText, { color: C.textSec }]}>{rx.date}</Text>
-            </View>
+            <Badge label={rx.status === 'dispatched' ? 'Dispatched' : 'Pending'} color={statusColor(rx.status)} />
           </View>
           {rx.status === 'pending_dispatch' && (
-            <Btn
-              label={dispatching === rx.id ? 'Dispatching…' : '🛵 Dispatch Rider'}
-              onPress={() => handleDispatch(rx.id)}
-              loading={dispatching === rx.id}
-              style={{ marginTop: 10, alignSelf: 'flex-start' }}
-              icon={<Icon name="truck-fast" lib="mc" size={16} color="#fff" />}
-            />
+            <View style={styles.actions}>
+              <Btn label="Dispatch now" size="sm"
+                icon={<Icon name="send" lib="feather" size={13} color="#fff" />} />
+              <Btn label="Edit" variant="ghost" size="sm" style={{ marginLeft: 8 }} />
+            </View>
           )}
         </Card>
       ))}
@@ -82,18 +53,12 @@ export function PharmacyScreen() {
 }
 
 const styles = StyleSheet.create({
-  summaryRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  summaryCard: { padding: 14, alignItems: 'center' },
-  summaryIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  summaryValue: { fontSize: 28, fontWeight: '900' },
-  summaryLabel: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  rxCard: { marginBottom: 12, padding: 14 },
-  rxHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
-  rxIcon: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  rxId: { fontSize: 11, marginBottom: 2 },
-  rxDrug: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
-  rxInstructions: { fontSize: 12 },
-  rxMeta: { borderRadius: 8, padding: 8, flexDirection: 'row', gap: 16 },
-  rxMetaItem: { flexDirection: 'row', alignItems: 'center' },
-  rxMetaText: { fontSize: 12 },
+  scopeNote: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 14 },
+  card:      { marginBottom: 10, padding: 14 },
+  row:       { flexDirection: 'row', alignItems: 'center' },
+  icon:      { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  drug:      { fontSize: 14, fontWeight: '700' },
+  sub:       { fontSize: 12, marginTop: 2 },
+  inst:      { fontSize: 11, marginTop: 2 },
+  actions:   { flexDirection: 'row', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#eee' },
 });

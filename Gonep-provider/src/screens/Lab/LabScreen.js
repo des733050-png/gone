@@ -1,59 +1,45 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../../theme/ThemeContext';
 import { Card } from '../../atoms/Card';
 import { Badge } from '../../atoms/Badge';
 import { Icon } from '../../atoms/Icon';
-import { Btn } from '../../atoms/Btn';
 import { ScreenContainer } from '../../organisms/ScreenContainer';
-import { getLabResults } from '../../api';
+import { MOCK_LAB } from '../../mock/data';
+import { isOwnDataOnly } from '../../config/roles';
 
-export function LabScreen() {
+export function LabScreen({ user }) {
   const { C } = useTheme();
-  const [labs, setLabs]       = useState([]);
-  const [filter, setFilter]   = useState('all');
+  const ownOnly = isOwnDataOnly(user?.role);
+  const labs = ownOnly
+    ? MOCK_LAB.filter(l => l.doctor_id === user?.id)
+    : MOCK_LAB;
 
-  useEffect(() => { getLabResults().then((d) => setLabs(d || [])); }, []);
-
-  const filtered = filter === 'all' ? labs : labs.filter((l) => l.status === filter);
-
-  const statusColor = { normal: 'success', high: 'warning', critical: 'danger' };
-  const statusLabel = { normal: '✓ Normal', high: '↑ High', critical: '⚠ Critical' };
+  const statusColor = (s) => s === 'critical' ? 'danger' : s === 'high' ? 'warning' : 'success';
 
   return (
     <ScreenContainer scroll>
-      <View style={styles.filtersRow}>
-        {['all', 'critical', 'high', 'normal'].map((f) => (
-          <Btn key={f} label={f.charAt(0).toUpperCase() + f.slice(1)} variant={filter === f ? 'primary' : 'ghost'}
-            size="sm" onPress={() => setFilter(f)} style={{ marginRight: 6 }} />
-        ))}
-      </View>
-      {labs.filter((l) => l.critical).length > 0 && filter !== 'normal' && (
-        <Card style={[styles.critBanner, { backgroundColor: C.dangerLight, borderColor: `${C.danger}60` }]}>
-          <Icon name="alert-circle" lib="feather" size={16} color={C.danger} style={{ marginRight: 8 }} />
-          <Text style={[styles.critText, { color: C.danger }]}>{labs.filter((l) => l.critical).length} critical result(s) require immediate attention</Text>
-        </Card>
+      {ownOnly && (
+        <View style={[styles.scopeNote, { backgroundColor: C.primaryLight, borderColor: C.primaryMid }]}>
+          <Icon name="shield" lib="feather" size={13} color={C.primary} style={{ marginRight: 6 }} />
+          <Text style={{ color: C.primary, fontSize: 12 }}>Showing your patients' results only</Text>
+        </View>
       )}
-      {filtered.map((l) => (
-        <Card key={l.id} style={[styles.labCard, l.critical && { borderColor: `${C.danger}60`, borderWidth: 2 }]}>
-          <View style={styles.labRow}>
-            <View style={[styles.labIcon, { backgroundColor: l.critical ? C.dangerLight : l.status === 'high' ? C.warningLight : C.successLight }]}>
-              <Icon name="flask-outline" lib="mc" size={22} color={l.critical ? C.danger : l.status === 'high' ? C.warning : C.success} />
+      {labs.map(l => (
+        <Card key={l.id} style={[styles.card, l.critical && { borderLeftWidth: 3, borderLeftColor: C.danger }]}>
+          <View style={styles.row}>
+            <View style={[styles.icon, { backgroundColor: l.critical ? C.dangerLight : C.primaryLight }]}>
+              <Icon name="flask-outline" lib="mc" size={20} color={l.critical ? C.danger : C.primary} />
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={[styles.labTest, { color: C.text }]}>{l.test}</Text>
-              <Text style={[styles.labPatient, { color: C.textMuted }]}>{l.patient} · {l.date}</Text>
-              <View style={styles.labResultRow}>
-                <Text style={[styles.labResult, { color: l.critical ? C.danger : l.status === 'high' ? C.warning : C.success }]}>{l.result}</Text>
-                <Text style={[styles.labRange, { color: C.textMuted }]}> (ref: {l.range})</Text>
-              </View>
+              <Text style={[styles.test, { color: C.text }]}>{l.test}</Text>
+              <Text style={[styles.patient, { color: C.textSec }]}>{l.patient} · {l.date}</Text>
+              <Text style={[styles.result, { color: l.critical ? C.danger : C.text }]}>
+                Result: {l.result} <Text style={{ color: C.textMuted }}>(Normal: {l.range})</Text>
+              </Text>
             </View>
-            <Badge label={statusLabel[l.status] || l.status} color={statusColor[l.status] || 'primary'} />
+            <Badge label={l.status} color={statusColor(l.status)} />
           </View>
-          {l.critical && (
-            <Btn label="Notify Patient" variant="danger" size="sm" style={{ marginTop: 8, alignSelf: 'flex-start' }}
-              icon={<Icon name="phone" lib="feather" size={14} color="#fff" />} />
-          )}
         </Card>
       ))}
     </ScreenContainer>
@@ -61,15 +47,11 @@ export function LabScreen() {
 }
 
 const styles = StyleSheet.create({
-  filtersRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 },
-  critBanner: { flexDirection: 'row', alignItems: 'center', borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1 },
-  critText: { fontSize: 13, fontWeight: '600', flex: 1 },
-  labCard: { marginBottom: 10, padding: 14 },
-  labRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  labIcon: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  labTest: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  labPatient: { fontSize: 12, marginBottom: 4 },
-  labResultRow: { flexDirection: 'row', alignItems: 'baseline' },
-  labResult: { fontSize: 16, fontWeight: '800' },
-  labRange: { fontSize: 11 },
+  scopeNote: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 14 },
+  card:      { marginBottom: 10, padding: 14 },
+  row:       { flexDirection: 'row', alignItems: 'center' },
+  icon:      { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  test:      { fontSize: 14, fontWeight: '700' },
+  patient:   { fontSize: 12, marginTop: 2 },
+  result:    { fontSize: 13, marginTop: 4, fontWeight: '500' },
 });

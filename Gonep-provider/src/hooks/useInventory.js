@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { getInventory } from '../api';
 
 export function useInventory() {
   const [inventory, setInventory] = useState([]);
-  const [loading, setLoading]     = useState(true);
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     let m = true;
-    getInventory().then((d) => { if (m) { setInventory(d || []); setLoading(false); } });
+    getInventory().then(data => { if (m) { setInventory(data || []); setLoading(false); } }).catch(() => setLoading(false));
     return () => { m = false; };
   }, []);
-  return { inventory, setInventory, loading };
+
+  return { inventory, loading };
 }
