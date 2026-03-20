@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Gonep Provider Portal",
+    "slug": "Gonep-provider-portal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.Gonep.providerportal"
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "icon": "./assets/logo.png",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#020617"
+    },
+    "plugins": []
+  }
+}
+

@@ -1,0 +1,1 @@
+export { PharmacyScreen } from './PharmacyScreen';

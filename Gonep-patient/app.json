@@ -1,0 +1,28 @@
+{
+  "expo": {
+  "name": "GONEP Patient Portal",
+  "slug": "gonep-patient-portal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+  "android": {
+      "package": "com.gonep.patientportal"
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "icon": "./assets/logo.png",
+    "splash": {
+      "image": "./assets/GONEP Logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#020617"
+    },
+    "plugins": []
+  }
+}

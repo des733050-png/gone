@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "GONEP Rider Portal",
+    "slug": "gonep-rider-portal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.gonep.riderportal"
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "icon": "./assets/logo.png",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#020617"
+    },
+    "plugins": []
+  }
+}
+

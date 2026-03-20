@@ -1,0 +1,37 @@
+{
+  "name": "Gonep-rider",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "cross-env NODE_ENV=dev expo start",
+    "start:mock": "cross-env EXPO_PUBLIC_API_MODE=mock EXPO_PUBLIC_API_BASE_URL=http://localhost:8001 EXPO_PUBLIC_RIDER_BASE_PATH=/api/v1/rider EXPO_PUBLIC_APP_NAME=\"GONEP RIDER PORTAL\" EXPO_PUBLIC_DEMO_EMAIL=rider@gonep.co.ke EXPO_PUBLIC_DEMO_PASSWORD=password123 EXPO_PUBLIC_API_TIMEOUT_MS=15000 expo start",
+    "start:dev": "cross-env NODE_ENV=dev expo start",
+    "start:staging": "cross-env NODE_ENV=staging expo start",
+    "start:prod": "cross-env NODE_ENV=production expo start",
+    "web": "cross-env NODE_ENV=dev expo start --web",
+    "web:mock": "cross-env EXPO_PUBLIC_API_MODE=mock EXPO_PUBLIC_API_BASE_URL=http://localhost:8001 EXPO_PUBLIC_RIDER_BASE_PATH=/api/v1/rider EXPO_PUBLIC_APP_NAME=\"GONEP RIDER PORTAL\" EXPO_PUBLIC_DEMO_EMAIL=rider@gonep.co.ke EXPO_PUBLIC_DEMO_PASSWORD=password123 EXPO_PUBLIC_API_TIMEOUT_MS=15000 expo start --web",
+    "web:dev": "cross-env NODE_ENV=dev expo start --web",
+    "web:staging": "cross-env NODE_ENV=staging expo start --web",
+    "web:prod": "cross-env NODE_ENV=production expo start --web",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "expo": "~55.0.4",
+    "expo-status-bar": "~55.0.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-helmet-async": "^3.0.0",
+    "react-native": "0.83.2",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.23.0",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "cross-env": "^10.1.0"
+  }
+}

@@ -1,0 +1,32 @@
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+
+# Build outputs
+dist/
+web-build/
+android/
+ios/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Environment files
+# .env          → commit this (mock defaults, no real secrets)
+# .env.example  → commit this (setup guide for new devs)
+# .env.development  → commit this (no secrets, just localhost URLs)
+# .env.staging      → commit this (no secrets, just staging URLs)
+# .env.production   → commit this (no secrets, just prod URLs)
+# .env.*.local      → NEVER commit (local overrides, may contain secrets)
+# .env.local        → NEVER commit (local overrides, may contain secrets)
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
