@@ -6,17 +6,38 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { SeoProvider } from './src/seo/SeoProvider';
 import { APP_CONFIG } from './src/config/env';
-import { AuthScreen } from './src/screens/Auth/AuthScreen';
-import { MainShell } from './src/screens/MainShell';
-import { HospitalOnboardingScreen } from './src/screens/Onboarding';
+import { PAGE_PATHS } from './src/seo/meta';
+import { AuthScreen }                from './src/screens/auth/Auth';
+import { MainShell }                 from './src/screens/MainShell';
+import { HospitalOnboardingScreen }  from './src/screens/auth/Onboarding';
 
 const Stack = createNativeStackNavigator();
 
 function RootNavigator() {
-  const { isDark, C } = useTheme();
+  const { isDark, C, setUserKey } = useTheme();
   const [user, setUser] = useState(null);
   // showOnboarding: true = new hospital registering (no existing account)
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+
+  // React Navigation linking config — gives each page a clean URL on web.
+  // On iOS/Android this is a no-op (in-app navigation only).
+  // Native deep-link support can be added later via app.json scheme config.
+  const linking = React.useMemo(() => ({
+    prefixes: [],
+    config: {
+      screens: {
+        // Keep auth route unique so it doesn't conflict with Main's root pattern.
+        Auth: 'login',
+        Main: {
+          path: '',
+          screens: Object.fromEntries(
+            Object.entries(PAGE_PATHS).map(([id, path]) => [id, path.slice(1)])
+          ),
+        },
+      },
+    },
+  }), []);
 
   const navTheme = useMemo(
     () => ({
@@ -31,12 +52,13 @@ function RootNavigator() {
     return (
       <HospitalOnboardingScreen
         onComplete={() => setShowOnboarding(false)}
+        onBack={() => setShowOnboarding(false)}
       />
     );
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer theme={navTheme} linking={linking} documentTitle={{ enabled: false }}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
           <Stack.Screen name="Auth">
@@ -44,16 +66,10 @@ function RootNavigator() {
               <View style={{ flex: 1 }}>
                 <AuthScreen
                   {...props}
-                  onAuth={setUser}
+                  onAuth={(u) => { setUserKey(u.email); setUser(u); }}
                   appName={APP_CONFIG.APP_NAME}
+                  onRegister={() => setShowOnboarding(true)}
                 />
-                {/* Register hospital link */}
-                <View style={[styles.registerBar, { backgroundColor: C.surface, borderTopColor: C.border }]}>
-                  <Text style={{ color: C.textMuted, fontSize: 13 }}>Are you a hospital?</Text>
-                  <TouchableOpacity onPress={() => setShowOnboarding(true)} style={styles.registerBtn}>
-                    <Text style={{ color: C.primary, fontWeight: '700', fontSize: 13 }}>Register your facility →</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
             )}
           </Stack.Screen>
@@ -91,6 +107,5 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root:        { flex: 1 },
-  registerBar: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12, borderTopWidth: 1 },
-  registerBtn: { padding: 4 },
+
 });

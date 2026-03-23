@@ -39,6 +39,16 @@ export const ENDPOINTS = Object.freeze({
   inventory:            `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/inventory/`,
   billing:              `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/billing/`,
   notifications:        `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/notifications/`,
+  // New — wire backend paths when ready
+  availability:         `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/availability/`,
+  activityLogs:         `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/activity-logs/`,
+  consultations:        `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/consultations/`,
+  clinicalSettings:     `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/clinical-settings/`,
+  supportTickets:       `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/support-tickets/`,
+  posAccounts:          `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/pos-accounts/`,
+  posTransactions:      `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/pos-transactions/`,
+  analytics:            `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/analytics/`,
+  staff:                `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/staff/`,
 });
 
 // ─── Mode flags ───────────────────────────────────────────────────────────

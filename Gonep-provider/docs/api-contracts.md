@@ -1,90 +1,83 @@
-## API Contracts – Provider Portal
+# GONEP Provider — API Contracts
 
-This document summarizes the main HTTP endpoints the **Gonep Provider Portal** expects. Exact schemas should be aligned with the backend team, but the shapes below match how the frontend is written today.
+All endpoints are prefixed with `EXPO_PUBLIC_PROVIDER_BASE_PATH` (default `/api/v1/provider`).
 
-> All paths are relative to:
-> - `BASE_URL` from `EXPO_PUBLIC_API_BASE_URL`
-> - `PROVIDER_BASE_PATH` from `EXPO_PUBLIC_PROVIDER_BASE_PATH` (default: `/api/v1/provider`)
+## Auth
+`POST /auth/login/`  → `{ access_token, user }`
 
----
+## Appointments
+`GET  /appointments/`             → `Appointment[]`
 
-### Dashboard
+## Prescriptions
+`GET  /prescriptions/`            → `Prescription[]`
+`POST /prescriptions/{id}/dispatch/` → `Prescription`
+`POST /prescriptions/{id}/cancel/`   → `Prescription`
 
-- **GET** `${PROVIDER_BASE_PATH}/dashboard/`
-  - **Used by**: provider dashboard screen.
-  - **Returns** summary metrics for the logged‑in provider (appointments today, pending prescriptions, lab flags, etc.).
+## Patients / EMR
+`GET  /emr/`                → `Patient[]`
+`GET  /emr/{id}/`           → `Patient`
 
----
+## Consultations
+`GET  /consultations/`                  → `Consultation[]`
+`GET  /consultations/?patient_id={id}`  → `Consultation[]` (filtered)
+`POST /consultations/`                  → `Consultation`
+`PATCH /consultations/{id}/`            → `Consultation`
+Edit window enforced server-side using `created_at` + `edit_window_hours` from clinical settings.
 
-### Appointments
+## Lab
+`GET  /lab/`                → `LabResult[]`
 
-- **GET** `${PROVIDER_BASE_PATH}/appointments/`
-  - **Used by**: Appointments screen and `useAppointments` hook.
-  - **Returns** a list of appointment objects, including:
-    - `id`, `patient`, `start_time`, `end_time`, `status`, and any clinic‑specific metadata.
+## Inventory
+`GET  /inventory/`                            → `InventoryItem[]`
+`POST /inventory/{id}/add-stock/`             → `InventoryItem`
+`POST /inventory/{id}/reduce-stock/`          → `InventoryItem`
+`PATCH /inventory/{id}/`                      → `InventoryItem`
+`POST /inventory/`                            → `InventoryItem` (new item)
+`POST /inventory/{id}/deactivate/`            → 204
+`POST /inventory/{id}/toggle-ecommerce/`      → `InventoryItem`
 
----
+## Billing
+`GET  /billing/`              → `BillingRecord[]`
+`POST /billing/{id}/pay/`     → `BillingRecord`
 
-### Prescriptions & Pharmacy
+## Notifications
+`GET  /notifications/`           → `Notification[]`
+`PATCH /notifications/{id}/read/`→ 204
+`POST /notifications/read-all/`  → 204
 
-- **GET** `${PROVIDER_BASE_PATH}/prescriptions/`
-  - **Used by**: Pharmacy screen.
-  - **Returns** active prescriptions and their dispatch status.
+## Availability
+`GET  /availability/`          → `{ [doctor_id]: DoctorSchedule }`
+`POST /availability/`          → add slot `{ doctorId, slot }`
+`PATCH /availability/`         → toggle block day `{ doctorId, day }`
+`DELETE /availability/`        → remove slot `{ doctorId, slotId }`
 
-- **POST** `${PROVIDER_BASE_PATH}/prescriptions/{id}/dispatch/`
-  - **Used by**: action to mark a prescription as dispatched.
-  - **Body**: empty (or minimal `{ note?: string }` if needed).
-  - **Returns** the updated prescription.
+## Staff
+`GET  /staff/`                         → `StaffMember[]`
+`POST /staff/`                         → `StaffMember`
+`PATCH /staff/{id}/`                   → `StaffMember`
+`POST /staff/{id}/suspend/`            → `StaffMember`
+`POST /staff/{id}/reactivate/`         → `StaffMember`
 
----
+## Activity Logs
+`GET  /activity-logs/`         → `ActivityLog[]`
 
-### EMR (Patients)
+## Analytics
+`GET  /analytics/`             → `AnalyticsPayload` (see MOCK_ANALYTICS shape)
 
-- **GET** `${PROVIDER_BASE_PATH}/emr/`
-  - **Used by**: EMR listing screen.
-  - **Returns** a list of patient summaries (id, name, identifier, age, flags).
+## Support Tickets
+`GET  /support-tickets/`           → `SupportTicket[]`
+`POST /support-tickets/`           → `SupportTicket`
+`PATCH /support-tickets/{id}/`     → `SupportTicket`
 
-- **GET** `${PROVIDER_BASE_PATH}/emr/{id}/`
-  - **Used by**: patient detail view.
-  - **Returns** detailed clinical data for the selected patient.
+## Clinical Settings
+`GET  /clinical-settings/`     → `{ edit_window_hours, allowed_values }`
+`PATCH /clinical-settings/`    → `{ edit_window_hours }`
 
----
+## POS Accounts
+`GET  /pos-accounts/`                  → `PosAccount[]`
+`POST /pos-accounts/`                  → `PosAccount`
+`POST /pos-accounts/{id}/reset-password/` → 204
 
-### Lab
-
-- **GET** `${PROVIDER_BASE_PATH}/lab/`
-  - **Used by**: Lab screen.
-  - **Returns** lab test results, including status and critical‑flag metadata.
-
----
-
-### Inventory
-
-- **GET** `${PROVIDER_BASE_PATH}/inventory/`
-  - **Used by**: Inventory screen and `useInventory` hook.
-  - **Returns** item records (drug name, SKU, quantity, thresholds, etc.).
-
----
-
-### Billing
-
-- **GET** `${PROVIDER_BASE_PATH}/billing/`
-  - **Used by**: Billing screen.
-  - **Returns** billing items and invoices for the facility or provider.
-
----
-
-### Notifications
-
-- **GET** `${PROVIDER_BASE_PATH}/notifications/`
-  - **Used by**: notifications badge and notifications screen.
-  - **Returns** a list of notifications (id, message, type, `read` flag, timestamps).
-
----
-
-### Notes
-
-- The frontend uses a **mock layer** with equivalent shapes under `src/mock`. When backend contracts change, update both:
-  - `ENDPOINTS` and API calls.
-  - Mock data/functions, so the development experience stays consistent without the backend.
-
+## POS Transactions
+`GET  /pos-transactions/?pos_id={id}` → `PosTransaction[]`
+`POST /pos-transactions/`             → `PosTransaction` (also triggers stock deduction)

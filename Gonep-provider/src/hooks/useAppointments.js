@@ -1,15 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getAppointments } from '../api';
 
 export function useAppointments() {
   const [appointments, setAppointments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState(null);
 
-  useEffect(() => {
-    let m = true;
-    getAppointments().then(data => { if (m) { setAppointments(data || []); setLoading(false); } }).catch(() => setLoading(false));
-    return () => { m = false; };
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await getAppointments();
+      setAppointments(data || []);
+    } catch (e) {
+      setError(e?.message || 'Failed to load appointments');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  return { appointments, loading };
+  useEffect(() => { load(); }, [load]);
+
+  return { appointments, loading, error, reload: load };
 }

@@ -94,7 +94,7 @@ export function TopBar({
           </View>
 
           {[
-            { label: 'My Profile', key: 'profile', icon: 'user' },
+            { label: 'My Profile', key: 'profile',  icon: 'user'     },
             { label: 'Settings',   key: 'settings', icon: 'settings' },
           ].map(item => (
             <TouchableOpacity
@@ -129,8 +129,8 @@ const styles = StyleSheet.create({
   rightArea:    { width: 96, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   unreadDot:    { position: 'absolute', top: -4, right: -8, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   userMenu:     {
-    position: 'absolute', top: 56, right: 16, borderRadius: 12, borderWidth: 1,
-    paddingVertical: 4, minWidth: 200,
+    position: 'absolute', top: 60, right: 16, borderRadius: 14, borderWidth: 1,
+    paddingVertical: 4, minWidth: 220, zIndex: 100,
     ...Platform.select({
       web:     { boxShadow: '0 8px 24px rgba(0,0,0,0.1)' },
       default: { shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 },

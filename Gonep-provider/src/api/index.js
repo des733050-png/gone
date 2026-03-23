@@ -1,85 +1,91 @@
-// src/api/index.js — Gonep Provider API layer
+// ─── src/api/index.js ────────────────────────────────────────────────────────
+// Single import point for all screens and hooks.
+// Routes to mock / dev / prod based on EXPO_PUBLIC_API_MODE.
 //
-// In `mock` mode, delegates to `src/mock/api.js`.
-// In non-mock modes, performs real HTTP calls to `ENDPOINTS` (best-effort).
-//
-// NOTE: This app assumes PUBLIC env var inlining via EXPO_PUBLIC_* at build time.
+// NEVER import from api/mock, api/dev, or api/prod directly in screens.
+// Always import from '../../api' (or '../api' etc.) so the environment
+// routing is handled here in one place.
+// ─────────────────────────────────────────────────────────────────────────────
 
-import { API_CONFIG, ENDPOINTS } from '../config/env';
-import {
-  fetchAppointments,
-  fetchPrescriptions,
-  dispatchPrescription as mockDispatchPrescription,
-  fetchPatients,
-  fetchLabResults,
-  fetchInventory,
-  fetchBilling,
-  fetchNotifications,
-} from '../mock/api';
+import { API_CONFIG } from '../config/env';
 
-const isMock = API_CONFIG.MODE === 'mock';
+const MODE = API_CONFIG.MODE; // 'mock' | 'development' | 'staging' | 'production'
 
-// Shared fetch helper with a simple timeout.
-async function apiFetch(url, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
-    });
-    if (!res.ok) throw new Error(`[Gonep-provider API] HTTP ${res.status} — ${url}`);
-    // Some endpoints may not return JSON; handle defensively.
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
-  } catch (err) {
-    if (err?.name === 'AbortError') {
-      throw new Error(`[Gonep-provider API] Request timed out after ${API_CONFIG.TIMEOUT_MS}ms — ${url}`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
+// Lazy-require each environment so bundlers can tree-shake unused layers.
+// Using conditional require (not dynamic import) keeps it synchronous and
+// compatible with Metro bundler without extra babel transforms.
+let layer;
+if (MODE === 'mock') {
+  layer = require('./mock/index');
+} else if (MODE === 'development') {
+  layer = require('./dev/index');
+} else {
+  // staging + production both use the prod layer (auth tokens, error reporting)
+  layer = require('./prod/index');
 }
 
-export async function getAppointments() {
-  return isMock ? fetchAppointments() : apiFetch(ENDPOINTS.appointments);
-}
+// ─── Re-export every function from the chosen layer ──────────────────────────
+// Adding a new API function? Add it to all three index files (mock/dev/prod)
+// then it will automatically appear here.
 
-export async function getPrescriptions() {
-  return isMock ? fetchPrescriptions() : apiFetch(ENDPOINTS.prescriptions);
-}
+export const getAppointments          = layer.getAppointments;
+export const getPrescriptions         = layer.getPrescriptions;
+export const dispatchPrescription     = layer.dispatchPrescription;
+export const getPatients              = layer.getPatients;
+export const getLabResults            = layer.getLabResults;
+export const getInventory             = layer.getInventory;
+export const getBilling               = layer.getBilling;
+export const getNotifications         = layer.getNotifications;
+export const getAvailability          = layer.getAvailability;
+export const getActivityLogs          = layer.getActivityLogs;
 
-export async function dispatchPrescription(id) {
-  return isMock
-    ? mockDispatchPrescription(id)
-    : apiFetch(ENDPOINTS.prescriptionDispatch(id), {
-        method: 'POST',
-        body: JSON.stringify({ id }),
-      });
-}
+// Billing
+export const markBillingPaid          = layer.markBillingPaid;
 
-export async function getPatients() {
-  return isMock ? fetchPatients() : apiFetch(ENDPOINTS.patients);
-}
+// Notifications
+export const markNotificationRead     = layer.markNotificationRead;
+export const markAllNotificationsRead = layer.markAllNotificationsRead;
 
-export async function getLabResults() {
-  return isMock ? fetchLabResults() : apiFetch(ENDPOINTS.labResults);
-}
+// Inventory
+export const addStock                 = layer.addStock;
+export const reduceStock              = layer.reduceStock;
+export const updateInventoryItem      = layer.updateInventoryItem;
+export const addInventoryItem         = layer.addInventoryItem;
+export const deactivateInventoryItem  = layer.deactivateInventoryItem;
+export const toggleEcommerce          = layer.toggleEcommerce;
 
-export async function getInventory() {
-  return isMock ? fetchInventory() : apiFetch(ENDPOINTS.inventory);
-}
+// Availability
+export const addAvailabilitySlot      = layer.addAvailabilitySlot;
+export const removeAvailabilitySlot   = layer.removeAvailabilitySlot;
+export const toggleBlockDay           = layer.toggleBlockDay;
 
-export async function getBilling() {
-  return isMock ? fetchBilling() : apiFetch(ENDPOINTS.billing);
-}
+// Staff (admin only)
+export const updateStaff              = layer.updateStaff;
+export const addStaffMember           = layer.addStaffMember;
+export const suspendStaff             = layer.suspendStaff;
+export const reactivateStaff          = layer.reactivateStaff;
 
-export async function getNotifications() {
-  return isMock ? fetchNotifications() : apiFetch(ENDPOINTS.notifications);
-}
+// Activity log (no-op in dev/prod — server handles it there)
+export const appendLog                = layer.appendLog;
 
+// Staff read (added)
+export const getStaff = layer.getStaff;
+
+// Consultations (added)
+export const getConsultations        = layer.getConsultations;
+export const getPatientConsultations = layer.getPatientConsultations;
+export const addConsultation         = layer.addConsultation;
+export const updateConsultation      = layer.updateConsultation;
+export const cancelPrescription      = layer.cancelPrescription;
+
+// Clinical settings, support tickets, POS (added)
+export const getClinicalSettings  = layer.getClinicalSettings;
+export const setClinicalSettings  = layer.setClinicalSettings;
+export const getSupportTickets    = layer.getSupportTickets;
+export const createSupportTicket  = layer.createSupportTicket;
+export const updateSupportTicket  = layer.updateSupportTicket;
+export const getPosAccounts       = layer.getPosAccounts;
+export const getPosTransactions   = layer.getPosTransactions;
+export const createPosAccount     = layer.createPosAccount;
+export const savePosTransaction   = layer.savePosTransaction;
+export const resetPosPassword     = layer.resetPosPassword;
