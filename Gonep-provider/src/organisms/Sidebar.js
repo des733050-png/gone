@@ -8,6 +8,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Image, Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { Avatar } from '../atoms/Avatar';
 import { Btn } from '../atoms/Btn';
@@ -155,6 +156,7 @@ export function Sidebar({
   notificationsUnread = 0,
 }) {
   const { C } = useTheme();
+  const insets = useSafeAreaInsets();
   const [openGroups, setOpenGroups] = useState({});
 
   const roleColorKeys = { primary: C.primary, purple: C.purple || '#8B5CF6', warning: C.warning, success: C.success, accent: C.accent || C.secondary };
@@ -176,14 +178,19 @@ export function Sidebar({
   return (
     <View style={containerStyle}>
       {/* ── Header ── */}
-      <View style={[styles.sidebarHeader, { borderBottomColor: C.divider }]}>
+      <View style={[styles.sidebarHeader, { borderBottomColor: C.divider, paddingTop: 14 + insets.top }]}>
         <Image source={require('../../assets/logo.png')} style={styles.logoImg} resizeMode="contain" />
         <View style={{ flex: 1, marginLeft: 8 }}>
           <Text style={[styles.brand,    { color: C.primary   }]}>GONEP</Text>
           <Text style={[styles.brandSub, { color: C.textMuted }]}>Provider Portal</Text>
         </View>
         {overlay && onClose && (
-          <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <TouchableOpacity
+            onPress={onClose}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+            style={styles.closeBtn}
+            activeOpacity={0.7}
+          >
             <Icon name="x" lib="feather" size={18} color={C.textMuted} />
           </TouchableOpacity>
         )}
@@ -264,6 +271,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: 1,
   },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   logoImg:  { width: 34, height: 34 },
   brand:    { fontWeight: '800', fontSize: 15 },
   brandSub: { fontSize: 10 },
@@ -296,7 +310,7 @@ const styles = StyleSheet.create({
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 9,
+    paddingVertical: 12,
     paddingHorizontal: 12,
     marginHorizontal: 6,
     marginVertical: 1,

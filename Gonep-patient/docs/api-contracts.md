@@ -11,13 +11,13 @@ This document summarizes the HTTP endpoints the **GONEP Patient Portal** expects
 ### Appointments
 
 - **GET** `appointments (list)`
-  - URL: `buildEndpoint('appointments', 'list')` → `${BASE_URL}{RESOURCE_MAP.appointments.basePath}`
+  - URL: `ENDPOINTS.appointments`
   - Used by: Appointments screen and `useAppointments` hook.
 - **GET** `appointments (detail)`
-  - URL: `buildEndpoint('appointments', 'detail', id)` → `${BASE_URL}{basePath}/{id}`
+  - URL: `ENDPOINTS.appointmentDetail(id)`
   - Used by: Appointment details screen.
 - **PATCH** `appointments (update)`
-  - URL: `buildEndpoint('appointments', 'update', id)` → `${BASE_URL}{basePath}/{id}`
+  - URL: `ENDPOINTS.appointmentUpdate(id)`
   - Body: partial appointment update payload.
 
 ---
@@ -25,11 +25,14 @@ This document summarizes the HTTP endpoints the **GONEP Patient Portal** expects
 ### Orders
 
 - **GET** `orders (list)`
-  - URL: `buildEndpoint('orders', 'list')`.
+  - URL: `ENDPOINTS.orders`
   - Used by: Orders screen.
+- **GET** `orders (detail)`
+  - URL: `ENDPOINTS.orderDetail(id)`
+  - Used by: order detail views (when added).
 - **POST** `orders (custom / reorder)`
-  - URL: `buildEndpoint('orders', 'custom', id)`.
-  - Body: `{ orderId: id, action: 'reorder' }`.
+  - URL: `ENDPOINTS.orderReorder(id)`
+  - Body: backend-defined (current UI calls POST with no required body in the frontend).
   - Used by: reorder action from the Orders screen.
 
 ---
@@ -37,27 +40,42 @@ This document summarizes the HTTP endpoints the **GONEP Patient Portal** expects
 ### Records
 
 - **GET** `records (list)`
-  - URL: `buildEndpoint('records', 'list')`.
+  - URL: `ENDPOINTS.records`
   - Used by: Records screen.
-- **GET** `records (custom / current user)`
-  - URL: `buildEndpoint('records', 'custom')`.
-  - Used by: `getCurrentUser` helper (placeholder until a dedicated auth/user endpoint is available).
+
+---
+
+### Vitals
+
+- **GET** `vitals (list)`
+  - URL: `ENDPOINTS.vitals`
+  - Used by: Vitals screen.
+
+---
+
+### Chat
+
+- **GET** `chat thread`
+  - URL: `ENDPOINTS.chatThread`
+  - Used by: Chat screen.
 
 ---
 
 ### Notifications
 
 - **GET** `notifications (list)`
-  - URL: `buildEndpoint('notifications', 'list')`.
+  - URL: `ENDPOINTS.notifications`
   - Used by: notifications badge and Notifications screen.
+- **PATCH** `notifications (mark read)`
+  - URL: `${ENDPOINTS.notifications}${id}/read/`
+  - Used by: mark-as-read actions (when added).
 
 ---
 
 ### Notes
 
-- The mock layer (`src/mock/data.js` and `src/mock/api.js`) mirrors these resources for development.
+- The mock dataset (`src/mock/data.js`) mirrors these resources for development and is consumed via `src/api/mock/index.js`.
 - When backend contracts change:
-  - Update `RESOURCE_MAP` and any action logic in `buildEndpoint`.
-  - Update the API functions in `src/api/index.js`.
-  - Adjust the mock implementations to keep shapes aligned.
+  - Update `ENDPOINTS` in `src/config/env.js`.
+  - Update the API layer functions (`src/api/dev`, `src/api/prod`) and mock layer (`src/api/mock`) to keep shapes aligned.
 

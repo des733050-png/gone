@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import { View, Pressable, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import { useResponsive } from '../theme/responsive';
 
 export function Card({ children, onPress, hover = false, style }) {
   const { C } = useTheme();
+  const { width } = useResponsive();
   const [hov, setHov] = useState(false);
+
+  const pad = width < 360 ? 16 : width < 640 ? 17 : 18;
 
   const interactive = hover || !!onPress;
   const baseStyle = [
@@ -12,6 +16,7 @@ export function Card({ children, onPress, hover = false, style }) {
     {
       backgroundColor: interactive && hov ? C.cardHover : C.card,
       borderColor: C.border,
+      padding: pad,
     },
     style,
   ];
@@ -47,7 +52,6 @@ const styles = StyleSheet.create({
   base: {
     borderWidth: 1,
     borderRadius: 14,
-    padding: 18,
   },
 });
 

@@ -2,9 +2,11 @@
 // Full patient record view. Pushed on top of the EMR list.
 // Role-gated: what each role sees is controlled via caps from usePatientDetail.
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../theme/ThemeContext';
 import { Icon } from '../../../atoms/Icon';
+import { Btn } from '../../../atoms/Btn';
 import { usePatientDetail } from '../../../hooks/usePatientDetail';
 import { ConsultationModal } from './molecules/ConsultationModal';
 import {
@@ -15,6 +17,7 @@ import { s } from './styles';
 
 export function PatientDetailScreen({ patient, user, onBack }) {
   const { C } = useTheme();
+  const insets = useSafeAreaInsets();
   const pd = usePatientDetail(patient, user);
 
   const RENDER_TAB = {
@@ -88,11 +91,34 @@ export function PatientDetailScreen({ patient, user, onBack }) {
       {/* ── Tab content ── */}
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 14, paddingBottom: 40 }}
+        contentContainerStyle={{
+          padding: 14,
+          paddingBottom: Platform.OS === 'web' ? 40 : 40 + 64 + insets.bottom,
+        }}
         showsVerticalScrollIndicator={false}
       >
         {(RENDER_TAB[pd.activeTab] || RENDER_TAB.overview)()}
       </ScrollView>
+
+      {/* Mobile bottom back action */}
+      {Platform.OS !== 'web' && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            borderTopWidth: 1,
+            borderTopColor: C.border,
+            backgroundColor: C.navBg,
+            paddingHorizontal: 14,
+            paddingTop: 10,
+            paddingBottom: Math.max(insets.bottom, 10),
+          }}
+        >
+          <Btn label="Back" variant="secondary" size="lg" onPress={onBack} full />
+        </View>
+      )}
 
       {/* ── Consultation modal ── */}
       <ConsultationModal

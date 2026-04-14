@@ -23,8 +23,10 @@ const _password = process.env.EXPO_PUBLIC_DEMO_PASSWORD;
 const _timeout  = process.env.EXPO_PUBLIC_API_TIMEOUT_MS;
 
 // ─── API config ───────────────────────────────────────────────────────────
+const normalizedBaseUrl = (_baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
+
 export const API_CONFIG = Object.freeze({
-  BASE_URL:   _baseUrl  || 'http://localhost:3000',
+  BASE_URL:   normalizedBaseUrl,
   TIMEOUT_MS: Number(_timeout || '15000'),
   // Supported: 'mock' | 'development' | 'staging' | 'production'
   // Fallback 'mock' means the app works on a fresh clone with no .env
@@ -52,9 +54,12 @@ export const ENDPOINTS = Object.freeze({
   appointmentDetail:  (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/appointments/${id}/`,
   appointmentUpdate:  (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/appointments/${id}/`,
   orders:             `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/orders/`,
+  orderDetail:        (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/orders/${id}/`,
   orderReorder:       (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/orders/${id}/reorder/`,
   records:            `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/records/`,
   recordsCurrentUser: `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/records/me/`,
+  vitals:             `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/vitals/`,
+  chatThread:         `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/chat/thread/`,
   notifications:      `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/notifications/`,
 });
 

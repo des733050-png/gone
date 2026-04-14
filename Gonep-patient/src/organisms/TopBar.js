@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useResponsive } from '../theme/responsive';
 import { Avatar } from '../atoms/Avatar';
@@ -19,6 +20,7 @@ export function TopBar({
 }) {
   const { C } = useTheme();
   const { sidebarDocked: sidebarDockedFromHook } = useResponsive();
+  const insets = useSafeAreaInsets();
 
   const isDocked =
     typeof sidebarDockedProp === 'boolean'
@@ -45,6 +47,7 @@ export function TopBar({
     <View
       style={[
         styles.topBar,
+        { paddingTop: insets.top, height: 56 + insets.top },
         { backgroundColor: C.navBg, borderBottomColor: C.border },
       ]}
     >
@@ -70,7 +73,7 @@ export function TopBar({
           <Text
             style={{
               color: C.text,
-              fontSize: 16,
+              fontSize: 18,
               fontWeight: '700',
             }}
             numberOfLines={1}
@@ -79,7 +82,7 @@ export function TopBar({
           </Text>
         </View>
         {meta.sub ? (
-          <Text style={{ color: C.textMuted, fontSize: 11 }}>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>
             {meta.sub}
           </Text>
         ) : null}
@@ -119,6 +122,7 @@ export function TopBar({
         <View
           style={[
             styles.userMenu,
+            { top: 56 + insets.top + 4, zIndex: 40, elevation: 40 },
             { backgroundColor: C.card, borderColor: C.border },
           ]}
           onMouseEnter={() => setHoveringMenu(true)}
@@ -161,7 +165,6 @@ export function TopBar({
 
 const styles = StyleSheet.create({
   topBar: {
-    height: 56,
     borderBottomWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -196,12 +199,12 @@ const styles = StyleSheet.create({
   },
   userMenu: {
     position: 'absolute',
-    top: 56,
     right: 16,
     borderRadius: 10,
     borderWidth: 1,
     paddingVertical: 4,
     minWidth: 160,
+    zIndex: 20,
     boxShadow: '0px 4px 8px rgba(0,0,0,0.08)',
     elevation: 3,
   },

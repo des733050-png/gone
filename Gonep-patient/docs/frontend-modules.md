@@ -78,19 +78,23 @@ Treat everything in `env.js` as **public**; do not put secrets here.
 ### `src/api/index.js`
 
 - **Why this file exists**  
-  - Encapsulates HTTP calls and API concerns away from UI components.  
-  - Makes it easy to change how requests are made (e.g. add auth headers, retry logic) without touching screens.
+  - Single import point for all screens and hooks.
+  - Routes to `mock` / `development` / `staging` / `production` API layers based on `EXPO_PUBLIC_API_MODE`.
+  - Keeps environment routing centralized so screens never import from environment-specific API files.
 
 - **How it works**  
-  - Imports `API_CONFIG` and `ENDPOINTS` from `src/config/env.js`.  
-  - Exposes helper functions like `login`, `fetchAppointments`, etc. that return parsed JSON.  
-  - Handles error mapping and common headers in one place.
+  - Reads `API_CONFIG.MODE` from `src/config/env.js`.
+  - Selects one layer and re-exports a consistent surface:
+    - `src/api/mock/index.js` (in-memory data)
+    - `src/api/dev/index.js` (real HTTP)
+    - `src/api/prod/index.js` (real HTTP + stricter guards)
+  - Shared network logic lives in `src/api/httpLayer.js` (timeout, error mapping, HTTPS guard for prod).
 
 In early stages, this can be a thin wrapper; as the project grows, this is where cross-cutting concerns like logging and caching should live.
 
 ---
 
-### `src/mock/data.js` & `src/mock/api.js`
+### `src/mock/data.js`
 
 - **Why these files exist**  
   - Provide predictable data for UI development before a real backend is ready.  
@@ -98,8 +102,7 @@ In early stages, this can be a thin wrapper; as the project grows, this is where
 
 - **How they work**  
   - `data.js` defines in-memory arrays/objects that mimic backend responses (appointments, orders, vitals, notifications, etc.).  
-  - `api.js` exports asynchronous functions that behave like network calls (e.g. returning a Promise with mock data and optional delays).  
-  - Screens or hooks can switch between real `src/api` and `src/mock/api` based on environment or flags.
+  - Mock behavior is exposed via `src/api/mock/index.js` so screens/hooks never import mock data directly.
 
 ---
 
@@ -142,11 +145,12 @@ Other domain-specific hooks (orders, vitals, notifications) should follow the sa
   - Implement the actual patient-facing features: dashboard, appointments, orders, tracking, vitals, records, notifications, profile, and settings.
 
 - **How they work**  
-  - Each feature folder (e.g. `Dashboard`, `Appointments`) owns:  
-    - An `index.js` entry that may re-export the `*Screen` or provide minor wiring.  
-    - A `*Screen.js` component that:  
-      - Consumes hooks (`useAppointments`, etc.) and context (`useTheme`, navigation hooks).  
-      - Composes atoms and organisms into causal UI flows.
+  - Screens are grouped into provider-style sections:
+    - `src/screens/Auth/`
+    - `src/screens/clinical/`
+    - `src/screens/operations/`
+    - `src/screens/account/`
+  - Each section folder re-exports the existing screen implementations so imports are consistent and scalable.
 
 Screens should **avoid** hard-coded API URLs or theme values and instead rely on the shared modules described above.
 

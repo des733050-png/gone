@@ -42,11 +42,12 @@ Backend requirements:
 ### Working with mocks vs real API
 
 - During early development, it is often more productive to:
-  - Use `src/mock/data.js` and `src/mock/api.js` to prototype UI flows.  
-  - Keep the shape of mock responses aligned with backend contracts.
+  - Use `src/mock/data.js` (data) via `src/api/mock/index.js` (behavior) to prototype UI flows.
+  - Keep the shape of mock responses aligned with backend contracts and `ENDPOINTS` in `src/config/env.js`.
 - When the backend is ready:
-  - Point `API_CONFIG.BASE_URL` to the backend.  
-  - Update the domain hooks (`useAppointments`, etc.) to call the real `src/api` functions instead of mocks.
+  - Set `EXPO_PUBLIC_API_MODE` to `development`, `staging`, or `production` and restart Metro.
+  - Point `EXPO_PUBLIC_API_BASE_URL` to the backend.
+  - Keep screens/hooks importing from `src/api` only (never import env-specific layers directly).
 
 ---
 
@@ -54,7 +55,11 @@ Backend requirements:
 
 When you add a new feature, follow the existing conventions:
 
-1. **Create a screen folder** under `src/screens/YourFeature`.  
+1. **Create a screen folder** under the appropriate section:
+   - `src/screens/clinical/YourFeature`
+   - `src/screens/operations/YourFeature`
+   - `src/screens/account/YourFeature`
+   - (auth) `src/screens/Auth`
 2. **Implement** `YourFeatureScreen.js` and an `index.js` that re-exports it.  
 3. **Add navigation wiring** in `MainShell` (and `Sidebar`/`TopBar` if needed).  
 4. **Create hooks** in `src/hooks` to fetch/process data.  

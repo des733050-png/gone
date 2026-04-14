@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useResponsive } from '../theme/responsive';
 import { Avatar } from '../atoms/Avatar';
@@ -14,6 +15,7 @@ export function TopBar({
 }) {
   const { C } = useTheme();
   const { sidebarDocked: sidebarDockedFromHook } = useResponsive();
+  const insets = useSafeAreaInsets();
   const isDocked = typeof sidebarDockedProp === 'boolean' ? sidebarDockedProp : sidebarDockedFromHook;
   const showSidebarToggle = !isDocked;
   const [hoveringMenu, setHoveringMenu] = useState(false);
@@ -33,7 +35,13 @@ export function TopBar({
   }, [userMenuOpen, hoveringMenu, setUserMenuOpen]);
 
   return (
-    <View style={[styles.topBar, { backgroundColor: C.navBg, borderBottomColor: C.border }]}>
+    <View
+      style={[
+        styles.topBar,
+        { paddingTop: insets.top, height: 56 + insets.top },
+        { backgroundColor: C.navBg, borderBottomColor: C.border },
+      ]}
+    >
       <View style={styles.leftArea}>
         {showSidebarToggle && !sidebarOpen ? (
           <TouchableOpacity onPress={onToggleSidebar}>
@@ -47,11 +55,11 @@ export function TopBar({
           {meta.icon && (
             <Icon name={meta.icon.name} lib={meta.icon.lib} size={18} color={C.primary} style={{ marginRight: 6 }} />
           )}
-          <Text style={{ color: C.text, fontSize: 16, fontWeight: '700' }} numberOfLines={1}>
+          <Text style={{ color: C.text, fontSize: 18, fontWeight: '700' }} numberOfLines={1}>
             {meta.title}
           </Text>
         </View>
-        {meta.sub ? <Text style={{ color: C.textMuted, fontSize: 11 }}>{meta.sub}</Text> : null}
+        {meta.sub ? <Text style={{ color: C.textMuted, fontSize: 12 }}>{meta.sub}</Text> : null}
       </View>
 
       <View style={styles.rightArea}>
@@ -74,7 +82,11 @@ export function TopBar({
 
       {userMenuOpen && (
         <View
-          style={[styles.userMenu, { backgroundColor: C.card, borderColor: C.border }]}
+          style={[
+            styles.userMenu,
+            { top: 56 + insets.top + 4, zIndex: 40, elevation: 40 },
+            { backgroundColor: C.card, borderColor: C.border },
+          ]}
           onMouseEnter={() => setHoveringMenu(true)}
           onMouseLeave={() => setHoveringMenu(false)}
         >
@@ -123,13 +135,13 @@ export function TopBar({
 }
 
 const styles = StyleSheet.create({
-  topBar:       { height: 56, borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
+  topBar:       { borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
   leftArea:     { width: 40, alignItems: 'flex-start', justifyContent: 'center' },
   titleArea:    { flex: 1, alignItems: 'center' },
   rightArea:    { width: 96, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   unreadDot:    { position: 'absolute', top: -4, right: -8, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   userMenu:     {
-    position: 'absolute', top: 60, right: 16, borderRadius: 14, borderWidth: 1,
+    position: 'absolute', right: 16, borderRadius: 14, borderWidth: 1,
     paddingVertical: 4, minWidth: 220, zIndex: 100,
     ...Platform.select({
       web:     { boxShadow: '0 8px 24px rgba(0,0,0,0.1)' },

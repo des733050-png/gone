@@ -83,7 +83,7 @@ This gives us a **single source of truth** for look and feel.
 
 ### 6. API, config, and mocks
 
-**Choice**: Central config in `src/config/env.js` plus a swappable API/mock layer.
+**Choice**: Central config in `src/config/env.js` plus an environment-routed API layer.
 
 - **Why this approach**  
   - Keeps environment-specific values (base URL, app name, feature flags) out of components.  
@@ -94,8 +94,13 @@ This gives us a **single source of truth** for look and feel.
     - `APP_CONFIG` – app name and other static metadata.  
     - `API_CONFIG` – base URL and standard headers.  
     - `ENDPOINTS` – string paths for specific resources (`authLogin`, `authRegister`, `appointments`, etc.).  
-  - `src/api/index.js` knows how to build full URLs and make network requests using this config.  
-  - `src/mock/data.js` and `src/mock/api.js` provide fake responses that mimic the real API shape; screens can be wired to use mocks in development.
+  - `src/api/index.js` selects one implementation layer based on `API_CONFIG.MODE` and re-exports a stable surface for screens/hooks.
+  - Layers:
+    - `src/api/mock/index.js` (in-memory mock behavior)
+    - `src/api/dev/index.js` (real HTTP calls)
+    - `src/api/prod/index.js` (real HTTP calls + stricter security guards)
+  - Shared fetch logic lives in `src/api/httpLayer.js` (timeouts, error mapping, production HTTPS guard).
+  - `src/mock/data.js` provides mock datasets consumed only by `src/api/mock/index.js`.
 
 ---
 

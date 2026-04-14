@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import { useResponsive } from '../theme/responsive';
 import { Icon } from './Icon';
 
 export function Input({
@@ -16,12 +17,15 @@ export function Input({
   style,
 }) {
   const { C } = useTheme();
+  const { width } = useResponsive();
   const [focused, setFocused] = useState(false);
+
+  const scale = width < 360 ? 1.12 : width < 640 ? 1.06 : 1;
 
   return (
     <View style={[styles.wrapper, style]}>
       {label && (
-        <Text style={[styles.label, { color: C.textSec }]}>
+        <Text style={[styles.label, { color: C.textSec, fontSize: Math.round(13 * scale) }]}>
           {label}
         </Text>
       )}
@@ -52,6 +56,8 @@ export function Input({
               backgroundColor: C.inputBg,
               color: C.text,
               paddingLeft: icon ? 38 : 14,
+              fontSize: Math.round(15 * scale),
+              paddingVertical: Math.round(12 * scale),
             },
           ]}
         />
@@ -59,10 +65,10 @@ export function Input({
       {error ? (
         <View style={styles.errorRow}>
           <Icon name="alert-circle" lib="feather" size={14} color={C.danger} style={{ marginRight: 4 }} />
-          <Text style={[styles.error, { color: C.danger }]}>{error}</Text>
+          <Text style={[styles.error, { color: C.danger, fontSize: Math.round(12 * scale) }]}>{error}</Text>
         </View>
       ) : (
-        hint && <Text style={[styles.hint, { color: C.textMuted }]}>{hint}</Text>
+        hint && <Text style={[styles.hint, { color: C.textMuted, fontSize: Math.round(11 * scale) }]}>{hint}</Text>
       )}
     </View>
   );
@@ -73,7 +79,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
-    fontSize: 13,
     fontWeight: '600',
     marginBottom: 6,
   },
@@ -90,12 +95,9 @@ const styles = StyleSheet.create({
     width: '100%',
     borderWidth: 1.5,
     borderRadius: 10,
-    fontSize: 14,
-    paddingVertical: 10,
     paddingRight: 14,
   },
   error: {
-    fontSize: 12,
     marginTop: 2,
   },
   errorRow: {
@@ -104,7 +106,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   hint: {
-    fontSize: 11,
     marginTop: 4,
   },
 });

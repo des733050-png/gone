@@ -4,17 +4,16 @@ import { useTheme } from '../theme/ThemeContext';
 import { useResponsive } from '../theme/responsive';
 import { Sidebar } from '../organisms/Sidebar';
 import { TopBar } from '../organisms/TopBar';
-import { DashboardScreen } from './Dashboard';
-import { AppointmentsScreen } from './Appointments';
-import { OrdersScreen } from './Orders';
-import { TrackOrderScreen } from './TrackOrder';
-import { RecordsScreen } from './Records';
-import { VitalsScreen } from './Vitals';
-import { ChatScreen } from './Chat';
-import { NotificationsScreen } from './Notifications';
-import { ProfileScreen } from './Profile';
-import { SettingsScreen } from './Settings';
-import { AppointmentDetailsScreen } from './Appointments/index';
+import { DashboardScreen } from './clinical/Dashboard';
+import { AppointmentsScreen, AppointmentDetailsScreen } from './clinical/Appointments';
+import { RecordsScreen } from './clinical/Records';
+import { VitalsScreen } from './clinical/Vitals';
+import { ChatScreen } from './clinical/Chat';
+import { OrdersScreen } from './operations/Orders';
+import { TrackOrderScreen } from './operations/TrackOrder';
+import { NotificationsScreen } from './account/Notifications';
+import { ProfileScreen } from './account/Profile';
+import { SettingsScreen } from './account/Settings';
 import { getNotifications } from '../api';
 import { PageSeo } from '../seo/PageSeo';
 
@@ -124,7 +123,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
       case 'vitals':
         return <VitalsScreen />;
       case 'chat':
-        return <ChatScreen user={user} />;
+        return <ChatScreen />;
       case 'notifications':
         return <NotificationsScreen />;
       case 'profile':
@@ -159,6 +158,12 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
         overlay={!sidebarDocked}
       />
       <View style={styles.main}>
+        {userMenuOpen && (
+          <TouchableWithoutFeedback onPress={() => setUserMenuOpen(false)}>
+            <View style={styles.menuOverlay} />
+          </TouchableWithoutFeedback>
+        )}
+        <View style={styles.topBarLayer}>
         <TopBar
           meta={meta}
           user={user}
@@ -174,11 +179,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
           userMenuOpen={userMenuOpen}
           setUserMenuOpen={setUserMenuOpen}
         />
-        {userMenuOpen && (
-          <TouchableWithoutFeedback onPress={() => setUserMenuOpen(false)}>
-            <View style={styles.menuOverlay} />
-          </TouchableWithoutFeedback>
-        )}
+        </View>
         <View style={styles.page}>{renderPage()}</View>
       </View>
     </View>
@@ -196,6 +197,11 @@ const styles = StyleSheet.create({
   },
   page: {
     flex: 1,
+    zIndex: 1,
+  },
+  topBarLayer: {
+    zIndex: 15,
+    elevation: 15,
   },
   menuOverlay: {
     position: 'absolute',
@@ -203,7 +209,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    zIndex: 1,
+    zIndex: 10,
   },
 });
 

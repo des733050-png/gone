@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, Text, ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import { useResponsive } from '../theme/responsive';
 import { Icon } from './Icon';
 
 export function Btn({
@@ -15,6 +16,7 @@ export function Btn({
   style,
 }) {
   const { C } = useTheme();
+  const { width } = useResponsive();
   const [hov, setHov] = useState(false);
 
   const vs = {
@@ -54,9 +56,25 @@ export function Btn({
     },
   };
 
-  const sz = { sm: 12, md: 14, lg: 16 };
-  const verticalPad = { sm: 6, md: 10, lg: 12 };
-  const horizontalPad = { sm: 12, md: 18, lg: 24 };
+  // Slightly larger fonts on phones; keep desktop stable.
+  const scale = width < 360 ? 1.12 : width < 640 ? 1.06 : 1;
+
+  const sz = {
+    sm: Math.round(12 * scale),
+    md: Math.round(14 * scale),
+    lg: Math.round(16 * scale),
+  };
+  // Target comfortable touch sizes on mobile.
+  const verticalPad = {
+    sm: Math.round(8 * scale),
+    md: Math.round(12 * scale),
+    lg: Math.round(14 * scale),
+  };
+  const horizontalPad = {
+    sm: Math.round(12 * scale),
+    md: Math.round(18 * scale),
+    lg: Math.round(24 * scale),
+  };
 
   const v = vs[variant] || vs.primary;
 

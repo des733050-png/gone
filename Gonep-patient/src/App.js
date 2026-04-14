@@ -7,8 +7,8 @@ import { ThemeProvider, useTheme } from './theme/ThemeContext';
 import { APP_CONFIG } from './config/env';
 import { SeoProvider } from './seo/SeoProvider';
 
-// Screens (to be implemented in dedicated files for clarity)
-import { AuthScreen } from './screens/Auth/AuthScreen';
+// Screens
+import { AuthScreen } from './screens/authentication';
 import { MainShell } from './screens/MainShell';
 
 const Stack = createNativeStackNavigator();

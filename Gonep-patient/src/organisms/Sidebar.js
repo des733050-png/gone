@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { Avatar } from '../atoms/Avatar';
 import { Btn } from '../atoms/Btn';
@@ -19,6 +20,7 @@ export function Sidebar({
   overlay = false,
 }) {
   const { C } = useTheme();
+  const insets = useSafeAreaInsets();
 
   if (!open) return null;
 
@@ -32,7 +34,7 @@ export function Sidebar({
 
   return (
     <View style={containerStyle}>
-      <View style={styles.sidebarHeader}>
+      <View style={[styles.sidebarHeader, { paddingTop: 14 + insets.top }]}>
       <Image
           source={require('../../assets/logo.png')}
           style={styles.logoImg}
@@ -43,13 +45,22 @@ export function Sidebar({
           <Text style={[styles.brandSub, { color: C.textMuted }]}>Patient Portal</Text>
         </View>
         {overlay && onClose ? (
-          <TouchableOpacity onPress={onClose}>
-            <Icon name="x" lib="feather" size={18} color={C.textMuted} />
+          <TouchableOpacity
+            onPress={onClose}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+            style={styles.closeBtn}
+            activeOpacity={0.7}
+          >
+            <Icon name="x" lib="feather" size={20} color={C.textMuted} />
           </TouchableOpacity>
         ) : null}
       </View>
 
-      <ScrollView style={{ flex: 1 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 12 }}
+      >
         {navItems.map((item) => {
           const active = item.id === activeId;
           return (
@@ -68,6 +79,8 @@ export function Sidebar({
                   onClose();
                 }
               }}
+              activeOpacity={0.75}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             >
               <Icon
                 name={item.icon.name}
@@ -151,6 +164,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   logoImg: {
     width: 36,
     height: 36,
@@ -165,7 +185,7 @@ const styles = StyleSheet.create({
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 12,
     marginHorizontal: 8,
     marginVertical: 2,

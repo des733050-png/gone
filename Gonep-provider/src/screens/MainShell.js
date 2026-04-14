@@ -388,6 +388,12 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
       />
 
       <View style={styles.main}>
+        {userMenuOpen && (
+          <TouchableWithoutFeedback onPress={() => setUserMenuOpen(false)}>
+            <View style={styles.menuOverlay} />
+          </TouchableWithoutFeedback>
+        )}
+        <View style={styles.topBarLayer}>
         <TopBar
           meta={meta}
           user={user}
@@ -400,11 +406,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
           userMenuOpen={userMenuOpen}
           setUserMenuOpen={setUserMenuOpen}
         />
-        {userMenuOpen && (
-          <TouchableWithoutFeedback onPress={() => setUserMenuOpen(false)}>
-            <View style={styles.menuOverlay} />
-          </TouchableWithoutFeedback>
-        )}
+        </View>
         <View style={styles.page}>{renderPage()}</View>
       </View>
     </View>
@@ -414,6 +416,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
 const styles = StyleSheet.create({
   root:        { flex: 1, flexDirection: 'row' },
   main:        { flex: 1, position: 'relative' },
-  page:        { flex: 1 },
-  menuOverlay: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
+  page:        { flex: 1, zIndex: 1 },
+  topBarLayer: { zIndex: 15, elevation: 15 },
+  menuOverlay: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10 },
 });

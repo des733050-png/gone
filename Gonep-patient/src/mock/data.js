@@ -91,6 +91,19 @@ export const MOCK_RECORDS = [
   },
 ];
 
+export const MOCK_VITALS = [
+  { id: 'hr', label: 'Heart Rate', value: '72 bpm', trend: 'Stable', icon: { lib: 'feather', name: 'activity' } },
+  { id: 'bp', label: 'Blood Pressure', value: '122/80', trend: 'Controlled', icon: { lib: 'mc', name: 'water' } },
+  { id: 'spo2', label: 'SpO2', value: '98%', trend: 'Normal', icon: { lib: 'feather', name: 'feather' } },
+  { id: 'bmi', label: 'BMI', value: '23.1', trend: 'Healthy range', icon: { lib: 'mc', name: 'human' } },
+];
+
+export const MOCK_CHAT_THREAD = [
+  { id: 'm1', from: 'doctor', text: 'Hi Faith, how are you feeling after your last visit?', time: '2:10 PM' },
+  { id: 'm2', from: 'patient', text: 'I am feeling much better, just mild headaches in the evening.', time: '2:12 PM' },
+  { id: 'm3', from: 'doctor', text: 'Great to hear. Please continue with the meds and drink plenty of water.', time: '2:13 PM' },
+];
+
 export const MOCK_NOTIFICATIONS = [
   {
     id: 'n1',
