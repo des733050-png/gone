@@ -1,183 +1,177 @@
-## Frontend Modules – Why & How
+## Frontend Modules - Patient Portal (How They Work)
 
-This document walks through the main frontend modules in the GONEP Patient Portal, explaining **why** each exists and **how** it is meant to be used.
+This document explains each important module in terms of:
 
----
-
-### `src/App.js` – Application root
-
-- **Why this file exists**  
-  - Central place to wire together:  
-    - Theme provider (`ThemeProvider`)  
-    - SEO provider (`SeoProvider`)  
-    - Navigation container and stack (`NavigationContainer`, `createNativeStackNavigator`)  
-    - Auth vs main shell routing
-
-- **How it works**  
-  - Defines a `RootNavigator` component that:  
-    - Reads `isDark` from `useTheme()` and builds a React Navigation theme (`navTheme`).  
-    - Keeps a `user` state variable that controls whether the `Auth` or `Main` stack screen is active.  
-  - Exposes the `App` component that wraps everything in:  
-    - `SafeAreaProvider` → ensures correct safe area handling.  
-    - `ThemeProvider` → exposes theme tokens to the rest of the tree.  
-    - `SeoProvider` → enables per-screen SEO configuration on the web.  
-    - A root `View` that hosts the `StatusBar` and `RootNavigator`.
-
-This file is the **composition root** for the frontend.
+- **Responsibility** (what it owns)
+- **Main functions** (what it does at runtime)
+- **Why this design** (why this type/approach was chosen)
 
 ---
 
-### `src/screens/MainShell.js` – Authenticated shell
+### `src/App.js`
 
-- **Why this file exists**  
-  - Provides a persistent layout (sidebar + topbar + content area) that all authenticated screens live inside.  
-  - Centralizes navigation between high-level sections like Dashboard, Appointments, Orders, etc.
+**Responsibility**
 
-- **How it works**  
-  - Receives `user`, `onLogout`, and `onUpdateUser` from `App`.  
-  - Renders `Sidebar` and `TopBar` organisms from `src/organisms`.  
-  - Manages which feature screen is active and passes down any shell-level props.  
-  - Acts as the main “frame” for logged-in users.
+- App composition root and top-level auth routing.
 
-Screens inside the shell should be relatively “dumb” in terms of layout and focus on data and content.
+**Main functions**
+
+- Creates `RootNavigator`.
+- Builds navigation theme from `isDark`.
+- Stores `user` and switches stack screen (`Auth` or `Main`).
+
+**Why this design**
+
+- Keeping auth-switch logic at the top prevents prop-drilling auth checks to every screen.
+- It also makes logout behavior predictable (`setUser(null)` always returns to auth).
 
 ---
 
-### `src/theme/ThemeContext.js` & `src/theme/colors.js`
+### `src/screens/MainShell.js`
 
-- **Why these files exist**  
-  - Define a consistent design system for the app that can be turned into light/dark themes without touching component code.  
-  - Avoid inline styling duplication and magic hex codes scattered across the codebase.
+**Responsibility**
 
-- **How they work**  
-  - `colors.js` exports structured palettes (e.g. `light`, `dark`) with semantic keys such as `primary`, `background`, `surface`, `text`, `muted`, `success`, `danger`.  
-  - `ThemeContext.js` creates a React context that holds:  
-    - The current theme mode (light/dark).  
-    - A toggle function (if implemented).  
-    - The resolved color tokens for that mode.  
-  - `ThemeProvider` wraps the app (in `App.js`) and `useTheme` reads from this context so any component can style itself using the shared tokens.
+- Authenticated workspace controller.
+
+**Main functions**
+
+- Holds shell state (`page`, `sidebarOpen`, `notificationsUnread`, `selectedAppointmentId`, `userMenuOpen`).
+- `openAppointmentDetails(id)` stores ID and routes to detail view.
+- `handleUserMenuSelect(key)` routes profile/settings or logs out.
+- `renderPage()` maps page keys to screen components.
+
+**Why this design**
+
+- Central shell-level state avoids duplicate sidebars/topbars in every feature screen.
+- A single `renderPage()` switch is easy to trace for new contributors.
+
+---
+
+### `src/screens/authentication/AuthScreen.js`
+
+**Responsibility**
+
+- Login and registration UX.
+
+**Main functions**
+
+- Collect credentials/profile data.
+- Calls API auth functions.
+- On success, calls `onAuth(userPayload)` from `App`.
+
+**Why this design**
+
+- Keeps auth UI and auth side effects together in one screen.
+- Parent component controls what happens after auth (single direction of data flow).
 
 ---
 
 ### `src/config/env.js`
 
-- **Why this file exists**  
-  - Single source of truth for app-level configuration and API settings.  
-  - Allows changing environments (local, staging, production) by editing a few values instead of hunting through components.
+**Responsibility**
 
-- **How it works**  
-  - Exports `APP_CONFIG` with values like `APP_NAME`.  
-  - Exports `API_CONFIG` with `BASE_URL` and default headers.  
-  - Exports `ENDPOINTS`/`endpoints` that define string paths for each backend resource.  
-  - The rest of the app imports these constants when performing network requests or rendering app metadata.
+- Public runtime config and endpoint assembly.
 
-Treat everything in `env.js` as **public**; do not put secrets here.
+**Main functions**
+
+- Reads `EXPO_PUBLIC_*` vars.
+- Exports `API_CONFIG`, `APP_CONFIG`, and `ENDPOINTS`.
+- Exports mode flags (`IS_MOCK`, `IS_DEV`, `IS_STAGING`, `IS_PROD`).
+
+**Why this design**
+
+- Prevents hardcoded URLs in screens.
+- Changing environments is safer because endpoint composition is centralized.
 
 ---
 
 ### `src/api/index.js`
 
-- **Why this file exists**  
-  - Single import point for all screens and hooks.
-  - Routes to `mock` / `development` / `staging` / `production` API layers based on `EXPO_PUBLIC_API_MODE`.
-  - Keeps environment routing centralized so screens never import from environment-specific API files.
+**Responsibility**
 
-- **How it works**  
-  - Reads `API_CONFIG.MODE` from `src/config/env.js`.
-  - Selects one layer and re-exports a consistent surface:
-    - `src/api/mock/index.js` (in-memory data)
-    - `src/api/dev/index.js` (real HTTP)
-    - `src/api/prod/index.js` (real HTTP + stricter guards)
-  - Shared network logic lives in `src/api/httpLayer.js` (timeout, error mapping, HTTPS guard for prod).
+- API facade for the whole app.
 
-In early stages, this can be a thin wrapper; as the project grows, this is where cross-cutting concerns like logging and caching should live.
+**Main functions**
 
----
+- Chooses the mode layer once.
+- Re-exports a fixed set of API functions for consumers.
 
-### `src/mock/data.js`
+**Why this design**
 
-- **Why these files exist**  
-  - Provide predictable data for UI development before a real backend is ready.  
-  - Allow quick visual iteration without waiting on API contracts.
-
-- **How they work**  
-  - `data.js` defines in-memory arrays/objects that mimic backend responses (appointments, orders, vitals, notifications, etc.).  
-  - Mock behavior is exposed via `src/api/mock/index.js` so screens/hooks never import mock data directly.
+- Screen/hook code does not need to know if data is mock/dev/prod.
+- This decouples feature implementation from deployment mode.
 
 ---
 
-### `src/hooks/useAppointments.js` (pattern for other domain hooks)
+### `src/api/httpLayer.js`
 
-- **Why this file exists**  
-  - Encapsulates the logic for loading and shaping appointment data.  
-  - Gives screens a simple interface: call `useAppointments()` and render based on returned state.
+**Responsibility**
 
-- **How it works**  
-  - Uses `useEffect` to trigger a fetch from the API or mock layer.  
-  - Tracks loading and error state.  
-  - Returns `{ appointments, isLoading, error }` (shape may vary) to the caller.
+- Shared network plumbing for non-mock layers.
 
-Other domain-specific hooks (orders, vitals, notifications) should follow the same pattern for consistency.
+**Main functions**
 
----
+- Request execution.
+- Timeout handling.
+- Error normalization.
+- HTTPS requirements in stricter modes.
 
-### `src/organisms/Sidebar.js`, `TopBar.js`, `ScreenContainer.js`
+**Why this design**
 
-- **Why these files exist**  
-  - Define the **layout primitives** used by the main shell.  
-  - Keep repetitive layout markup (padding, background colors, typography for section titles) out of individual screens.
-
-- **How they work**  
-  - `Sidebar`  
-    - Renders navigation items, active state, and possibly user profile shortcuts.  
-    - Calls back to the shell when a section is selected.
-  - `TopBar`  
-    - Hosts global actions (search, notifications, avatar, logout).  
-    - Helps maintain consistent top-level spacing and brand presence.
-  - `ScreenContainer`  
-    - Provides a consistent padding and background for screen content, and can handle scroll vs fixed layouts.
+- One place to enforce transport rules gives consistent error behavior.
+- Avoids repeating fetch boilerplate in every API module.
 
 ---
 
-### `src/screens/*` – Feature screens
+### `src/hooks/*` (`useAppointments`, `useRecords`, `useVitals`, `useChatThread`)
 
-- **Why these files exist**  
-  - Implement the actual patient-facing features: dashboard, appointments, orders, tracking, vitals, records, notifications, profile, and settings.
+**Responsibility**
 
-- **How they work**  
-  - Screens are grouped into provider-style sections:
-    - `src/screens/Auth/`
-    - `src/screens/clinical/`
-    - `src/screens/operations/`
-    - `src/screens/account/`
-  - Each section folder re-exports the existing screen implementations so imports are consistent and scalable.
+- Data loading lifecycle per domain.
 
-Screens should **avoid** hard-coded API URLs or theme values and instead rely on the shared modules described above.
+**Main functions**
 
----
+- Trigger fetch on mount/dependency change.
+- Expose domain data + loading + error state.
+- Keep transformation logic close to data source.
 
-### `src/seo/*` – SEO helpers
+**Why this design**
 
-- **Why these files exist**  
-  - Web builds benefit from proper `<title>` and basic meta tags for clarity and search.  
-  - We want SEO configuration to be declarative and per-screen, not mixed into low-level components.
-
-- **How they work**  
-  - `SeoProvider` wraps the app and provides the Helmet/SEO context.  
-  - `PageSeo` is a small component that a screen can render to set its title and description.  
-  - `meta.js` centralizes reusable SEO defaults and shared strings.
-
-On native builds, these components are effectively no-ops.
+- Screens remain presentation-focused.
+- Shared logic can be reused across multiple screens without duplication.
 
 ---
 
-### `src/atoms/*` – Atoms
+### `src/organisms/*` and `src/atoms/*`
 
-- **Why these files exist**  
-  - Provide branded, reusable UI elements (buttons, inputs, cards, badges, avatar) that embody the GONEP visual language.
+**Responsibility**
 
-- **How they work**  
-  - Each atom wraps a React Native primitive (`Pressable`, `TextInput`, `View`, etc.).  
-  - Atoms read from `useTheme` so they stay in sync with the current theme.  
-  - Screens and organisms compose atoms rather than styling primitives directly, which keeps the design consistent.
+- UI reuse and consistency.
+
+**Main functions**
+
+- `atoms`: foundational UI controls (`Btn`, `Input`, `Card`, `Badge`, `Icon`, `Avatar`).
+- `organisms`: larger layout patterns (`Sidebar`, `TopBar`, `ScreenContainer`).
+
+**Why this design**
+
+- Faster visual consistency across screens.
+- Lower maintenance cost when style tokens/components change.
+
+---
+
+### `src/seo/*`
+
+**Responsibility**
+
+- Web metadata management.
+
+**Main functions**
+
+- `SeoProvider` provides head context.
+- `PageSeo` maps page key -> title/meta tags.
+
+**Why this design**
+
+- SEO logic stays out of business components and remains easy to evolve.
 

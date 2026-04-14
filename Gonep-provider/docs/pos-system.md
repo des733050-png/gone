@@ -8,7 +8,7 @@ standard provider shell entirely and renders a full-screen sales interface.
 ## Account lifecycle
 1. **Hospital admin** creates a POS account in Staff → POS Terminals section.
    Required fields: terminal name, login email. Password is set by admin.
-2. The POS user logs in — `App.js` detects `user.role === 'pos'` and renders
+2. The POS user logs in — `MainShell.js` detects `user.role === 'pos'` and renders
    `POSScreen` directly (no sidebar, no nav tree).
 3. Admin can reset the password, deactivate, or reactivate any terminal.
 4. Multiple POS accounts can exist per facility (e.g. reception till + pharmacy counter).

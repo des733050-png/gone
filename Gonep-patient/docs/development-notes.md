@@ -18,7 +18,9 @@ You can comfortably develop all UI and flows on the web and later verify/adjust 
 ### Scripts (from `package.json`)
 
 - **`npm start`** → `expo start` (opens Expo dev tools).  
-- **`npm run web`** → `expo start --web` (web target, primary workflow at the moment).  
+- **`npm run web`** → `expo start` (same as current `web` script in `package.json`).  
+- **`npm run web:mock`** → `expo start --web` in explicit mock mode.  
+- **`npm run web:dev|web:staging|web:prod`** → `expo start --web` with corresponding NODE_ENV.  
 - **`npm run android`** → `expo run:android` (requires Android SDK).  
 - **`npm run ios`** → `expo run:ios` (requires macOS + Xcode).
 

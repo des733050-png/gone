@@ -1,73 +1,122 @@
-# GONEP Provider — Architecture
+# GONEP Provider - Architecture Explained
 
-## Overview
-React Native + Expo web application. Runs on web (primary), iOS, and Android.
-Single codebase, multiple deployment targets via Expo.
+This document explains how the provider portal works in code, and why the architecture uses this pattern.
 
-## Folder structure
-```
-src/
-  api/              ← API router + 3 environment layers
-    index.js        ← SINGLE import point for all screens — routes by MODE
-    mock/index.js   ← delegates to src/mock/api.js, no network calls
-    dev/index.js    ← real HTTP to localhost:8001
-    prod/index.js   ← real HTTP + bearer token auth + error reporting
+## 1) High-level design goals
 
-  config/
-    env.js          ← API_CONFIG, ENDPOINTS, IS_MOCK, IS_DEV, IS_STAGING, IS_PROD
-    roles.js        ← ROLES enum, ROLE_NAV (per-role page access), helpers
+- Keep one codebase for web/mobile.
+- Support many provider roles with different access in one shell.
+- Allow mock-first development without changing feature code.
+- Keep shell behavior (navigation, filters, role gating) centralized.
 
-  mock/
-    data.js         ← All mock data constants + MOCK_DELAY_MS dev config
-    api.js          ← In-memory mutable state + all mock mutations
+---
 
-  screens/
-    MainShell.js    ← Auth shell: nav tree, page routing, sidebar, topbar
-    clinical/       ← Dashboard, Appointments, Availability, EMR, Lab, Pharmacy
-    operations/     ← Billing, Inventory, Staff, Logs, Analytics, SupportTickets
-    account/        ← Notifications, Profile, Settings
-    auth/           ← Auth (login), Onboarding (hospital registration)
-    pos/            ← POSScreen (full-screen POS terminal, bypasses MainShell)
+## 2) App boot flow
 
-  organisms/
-    Sidebar.js      ← Sectioned sidebar with collapsible nav groups + sub-items
-    TopBar.js       ← Header: title, notifications badge, user menu (Sign Out)
-    ScreenContainer.js ← Scroll/padding wrapper used by all content screens
+`App.js` (repo root) is the composition entry:
 
-  atoms/            ← Btn, Card, Badge, Icon, Avatar, Input
-  theme/            ← ThemeContext (persistent by email), colors (light/dark)
-  hooks/            ← useInventory, useAppointments (data + reload + error)
-  seo/              ← PageSeo, SeoProvider, meta (web <head> management)
-```
+1. `SafeAreaProvider`
+2. `ThemeProvider`
+3. `SeoProvider`
+4. `RootNavigator`
 
-## Environment switching
-Set `EXPO_PUBLIC_API_MODE` in the appropriate .env file:
-- `mock`        → all data from src/mock, zero network (default, for all UI dev)
-- `development` → real HTTP to `EXPO_PUBLIC_API_BASE_URL` (local backend)
-- `staging`     → real HTTP to staging server
-- `production`  → real HTTP + bearer token + error monitoring hooks
+`RootNavigator` controls:
 
-All screens import exclusively from `src/api` — never from `src/api/mock` directly.
-This ensures the environment layer swap requires exactly one config change.
+- `user` authentication state
+- onboarding toggle (`showOnboarding`)
+- web linking configuration (`PAGE_PATHS`)
 
-## Nav tree and role gating
-`MainShell.js` owns `ALL_NAV_TREE` — the canonical definition of all sections,
-nav items, sub-items, and which roles can see each. `Sidebar.js` receives the
-filtered `navTree` (already role-filtered in `MainShell`) and renders sections
-with collapsible groups.
+If not authenticated -> render `AuthScreen`.
+If authenticated -> render `MainShell`.
 
-Sub-items map to page + filter combos via `SUB_TO_PAGE` in `MainShell.js`.
-Tapping "Unassigned" in the Appointments sub-menu navigates to the appointments
-page with `filter='unassigned'` passed as a prop — the screen applies it.
+**Why this type of routing?**
 
-## POS role
-The `pos` role bypasses `MainShell` entirely. `App.js` detects `user.role === 'pos'`
-and renders `POSScreen` directly with no sidebar. POS accounts are created by
-hospital_admin in the Staff screen.
+- Keeps auth/onboarding transitions centralized.
+- Feature screens stay focused on business workflows.
 
-## Theme persistence
-`ThemeContext` stores dark/light preference in localStorage (web) or AsyncStorage
-(native), keyed by `gonep_theme_{user.email}`. Called via `setUserKey(user.email)`
-immediately after successful login in `App.js`. Pre-login falls back to the
-device default (light). This means two different users on the same device keep
-independent theme preferences.
+---
+
+## 3) MainShell as system controller
+
+`src/screens/MainShell.js` is the main orchestration layer.
+
+It owns:
+
+- `ALL_NAV_TREE`: canonical sections/items/sub-items.
+- Role filtering for each user.
+- `SUB_TO_PAGE`: sub-item -> page/filter mapping.
+- `renderPage()`: page key -> concrete screen component.
+- shell states (sidebar open, unread notifications, active page/filter).
+
+**Why a single nav tree object instead of scattered constants?**
+
+- One source of truth for visibility rules and navigation structure.
+- New menu items can be added without touching many files.
+
+---
+
+## 4) Role-based behavior
+
+Role access is enforced in two layers:
+
+- `config/roles.js`: allowed pages helper.
+- `MainShell`: per-item/per-sub-item role filtering.
+
+This double layer keeps both broad permissions and detailed menu behavior explicit.
+
+---
+
+## 5) POS branch
+
+POS users are treated as a special workflow:
+
+- `MainShell` checks `user.role === 'pos'`.
+- For POS role, it bypasses normal provider shell and renders `POSScreen` directly.
+
+**Why this branch exists**
+
+- POS is a terminal workflow, not a clinical workflow.
+- It needs full-screen focus and separate interaction patterns (cart, checkout, receipt, shift summary).
+
+---
+
+## 6) API architecture (mode-based facade)
+
+`src/api/index.js` is the facade used by screens/hooks.
+
+- `mock` mode -> `src/api/mock/index.js`
+- `development` mode -> `src/api/dev/index.js`
+- `staging/production` -> `src/api/prod/index.js`
+
+**Why this approach instead of branching inside screens**
+
+- Screens call stable function names and remain environment-agnostic.
+- Mock/dev/prod swap is configuration-driven.
+
+---
+
+## 7) Mock state model
+
+`src/mock/api.js` uses module-level mutable arrays as in-memory server state.
+
+Why this type:
+
+- Multiple screens (inventory, POS, billing, pharmacy) can share mutable state in one session.
+- Mimics backend behavior closely enough for UI and workflow development.
+
+Trade-off:
+
+- State resets on refresh; persistent correctness still depends on real backend.
+
+---
+
+## 8) Theme persistence
+
+`ThemeContext` persists theme per user key (`gonep_theme_{email}`):
+
+- Web -> `localStorage`
+- Native -> `AsyncStorage`
+
+Why per-user storage:
+
+- Shared devices can preserve preferences independently for each login identity.

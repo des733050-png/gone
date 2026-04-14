@@ -1,49 +1,85 @@
-## State Management – Patient Portal
+## State Management - Patient Portal (Why + How)
 
-How state is managed in the **GONEP Patient Portal** and how it can evolve.
-
----
-
-### Local UI state
-
-- Local UI concerns (sidebar open/closed, active page, form inputs) are handled with plain React state:
-  - `useState` in `App` and `MainShell` for auth and navigation.
-  - Local component state in atoms (e.g. button hover) and screens.
-- This keeps simple UI logic close to the components that use it.
+How state moves through the app, and why the current approach was chosen.
 
 ---
 
-### Data‑loading hooks
+### 1) Core principle: keep state close to usage
 
-- Domain‑specific hooks live under `src/hooks`:
-  - Example: `useAppointments`.
-- Pattern:
-  - Call the relevant function in `src/api/index.js` inside a `useEffect`.
-  - Track `loading` and optional `error` state.
-  - Return structured data with flags such as `{ appointments, isLoading, error }`.
-- Screens depend on these hooks rather than calling `fetch` or `src/api` directly.
+- The app uses `useState` + custom hooks instead of a global store.
+- **Why:** current complexity is moderate; local state is easier to follow and debug.
+- **Trade-off:** if cross-screen dependencies grow a lot, a central store may become useful later.
 
 ---
 
-### Mock vs real API
+### 2) Where state lives today
 
-- `API_CONFIG.MODE` (from `src/config/env.js`) controls whether:
-  - Calls go to the mock layer (`src/mock/api.js`), or
-  - Use real HTTP endpoints composed with `buildEndpoint`.
-- Screens and hooks are intentionally unaware of this detail; they import helpers from `src/api/index.js`.
+**App-level state (`src/App.js`)**
+
+- `user`: controls auth vs main shell rendering.
+
+**Shell-level state (`src/screens/MainShell.js`)**
+
+- Active page
+- Sidebar visibility
+- Notification unread count
+- Appointment detail selection
+- User menu visibility
+
+**Screen-level state**
+
+- Filter values, form fields, modal visibility, local UI interactions.
 
 ---
 
-### Future evolution
+### 3) Hook state pattern
 
-If the patient portal grows in complexity, consider:
+Hooks in `src/hooks` (for example `useAppointments`) usually follow this lifecycle:
 
-- **React Query / SWR**
-  - For caching, deduplication, and background refresh of appointments, orders, records, and notifications.
-- **Zustand / Redux**
-  - For cross‑screen state (e.g. cross‑cutting auth/session data, feature flags) if it becomes difficult to manage via props and simple hooks.
-- **Shared data layer**
-  - When patient, provider, and rider portals share more of the same API contracts, extract common fetching and normalization logic into a reusable shared module.
+1. Initialize `loading=true`, `error=null`, and empty data.
+2. On mount/trigger, call a function from `src/api`.
+3. On success, set data and `loading=false`.
+4. On failure, set `error` and `loading=false`.
 
-For now, the hook‑based approach is deliberately light‑weight and fits the current feature set.
+This keeps side effects out of visual components.
+
+---
+
+### 4) Why hooks instead of direct API calls in screens
+
+- Reuse: multiple screens can share one data-loading behavior.
+- Testability: hook logic can be validated independently of UI markup.
+- Readability: screen files focus on rendering and interaction.
+
+---
+
+### 5) Mode switching (mock/dev/prod) and state impact
+
+- `src/api/index.js` chooses the active API layer once using `API_CONFIG.MODE`.
+- Hooks always call the same exported function names.
+- **Why this matters:** switching data source does not require screen rewrites.
+
+---
+
+### 6) Example flow
+
+When a user opens appointments:
+
+1. `MainShell` sets page to appointments.
+2. Appointments screen mounts.
+3. `useAppointments` starts loading.
+4. Hook calls `getAppointments()` from `src/api`.
+5. API facade forwards to mock/dev/prod implementation.
+6. Hook updates local state; UI re-renders.
+
+---
+
+### 7) When to introduce a global store
+
+Consider React Query, Zustand, or Redux if you start seeing:
+
+- repeated fetch/caching logic across many screens,
+- difficult cross-screen synchronization,
+- complex optimistic updates/rollback requirements,
+- background refresh requirements across multiple domains.
 

@@ -12,7 +12,7 @@ users are hitting the server simultaneously.
 Used in `MainShell.js` for:
 - `allowedPages` — recalculates only when `user.role` changes (rare)
 - `navTree` — recalculates only when role or allowedPages changes
-- `pageMeta` — recalculates only when page or unread count changes
+- `meta` — recalculates only when page, user details, or unread count changes
 
 ### useCallback
 Used for:

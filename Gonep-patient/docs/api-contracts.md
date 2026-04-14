@@ -6,6 +6,21 @@ This document summarizes the HTTP endpoints the **GONEP Patient Portal** expects
 > - `BASE_URL` from `EXPO_PUBLIC_API_BASE_URL`
 > - Path fragments defined in `ENDPOINTS` in `src/config/env.js`
 
+## How frontend functions map to endpoints
+
+The UI does not call `fetch` directly. It calls functions from `src/api/index.js`, for example:
+
+- `getAppointments()` -> `ENDPOINTS.appointments`
+- `getOrderById(id)` -> `ENDPOINTS.orderDetail(id)`
+- `reorderOrder(id)` -> `ENDPOINTS.orderReorder(id)`
+- `markNotificationRead(id)` -> `${ENDPOINTS.notifications}${id}/read/`
+
+Why this design:
+
+- one stable API surface for hooks/screens,
+- easy environment swapping (`mock`, `development`, `staging`, `production`),
+- endpoint changes are localized to config/api layers.
+
 ---
 
 ### Appointments
@@ -19,6 +34,20 @@ This document summarizes the HTTP endpoints the **GONEP Patient Portal** expects
 - **PATCH** `appointments (update)`
   - URL: `ENDPOINTS.appointmentUpdate(id)`
   - Body: partial appointment update payload.
+
+---
+
+### Auth & Current User
+
+- **POST** `auth login`
+  - Used by: `loginPatient()`
+- **POST** `auth register`
+  - Used by: `registerPatient()`
+- **GET** `current user`
+  - URL: `ENDPOINTS.currentUser`
+  - Used by: `getCurrentUser()`
+
+> Note: auth endpoint paths are implemented inside `src/api/httpLayer.js`, while resource endpoints come from `ENDPOINTS` in `src/config/env.js`.
 
 ---
 

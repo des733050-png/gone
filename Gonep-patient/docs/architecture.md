@@ -1,145 +1,135 @@
-## GONEP Patient Portal – Architecture
+## GONEP Patient Portal - Architecture Explained
 
-This document explains **why** the current architecture was chosen and **how** the main pieces fit together.
-
----
-
-### 1. High-level goals
-
-- **Single codebase** for web and (future) mobile.
-- **Consistent design system** via a central theme.
-- **Separation of concerns** between UI, layout, and data access.
-- **Easy backend swap** from mocks to a real API.
-
-These goals drove us to pick **Expo + React Native**, with **react-navigation** for routing and a layered UI structure (`atoms → organisms → screens`).
+This guide explains the codebase in plain language: what each layer does, how data flows, and why these implementation choices were made.
 
 ---
 
-### 2. Platform & runtime
+### 1) Why this stack
 
-**Choice**: Expo + React Native + React Native Web
-
-- **Why this approach**  
-  - Expo dramatically simplifies dev tooling (bundler, dev server, OTA updates) and gives us a path to native apps later.  
-  - React Native Web lets us reuse the same components on the web without rewriting everything in plain React DOM.
-
-- **How it works**  
-  - `expo` runs a Metro dev server.  
-  - For web (`npm run web` / `expo start --web`), `react-native-web` translates React Native primitives (`View`, `Text`, etc.) into DOM elements.  
-  - For Android/iOS (once SDKs are available), the same JSX renders into native views.
+- **Expo + React Native + React Native Web** is used so one codebase can run on web now and mobile later.
+- **Why not separate React web + native apps?** Faster delivery and less duplicated UI/business logic.
+- **Trade-off:** some web-only polish can take extra work, but shared features ship much faster.
 
 ---
 
-### 3. App shell and navigation
+### 2) App entry and boot flow (`src/App.js`)
 
-**Choice**: Native stack navigator with an explicit **Auth → MainShell** split.
+`App` wraps providers in this order:
 
-- **Why this approach**  
-  - Many apps share the same pattern: user must authenticate, then enters a complex shell with multiple sections (dashboard, appointments, orders, etc.).  
-  - A stack navigator with two main routes (`Auth`, `Main`) models this cleanly without introducing heavy global state or custom routing.
+1. `SafeAreaProvider` - device-safe paddings
+2. `ThemeProvider` - global theme tokens (`useTheme`)
+3. `SeoProvider` - web `<head>` metadata
+4. `RootNavigator` - auth/main routing
 
-- **How it works**  
-  - In `src/App.js`, `RootNavigator` holds a `user` state.  
-  - When `user` is `null`, the stack shows `Auth`. When `user` is set, the stack shows `Main` (the main shell).  
-  - `AuthScreen` receives an `onAuth` callback; once login succeeds, it calls `onAuth(userPayload)`, which flips `user` and causes React Navigation to switch to the `Main` route.
-  - `MainShell` is responsible for lateral navigation between feature screens (Dashboard, Appointments, Orders, etc.), typically backing the sidebar and topbar.
+**How `RootNavigator` works**
 
-This keeps **authentication** logic localized and makes it simple to later replace the `user` state with a more robust auth solution (tokens, refresh, secure storage).
+- Holds `user` in `useState(null)`.
+- If `user` is missing: render `AuthScreen`.
+- If `user` exists: render `MainShell`.
+- Passes callbacks:
+  - `onAuth={setUser}` to log in
+  - `onLogout={() => setUser(null)}` to log out
+  - `onUpdateUser={setUser}` for profile updates
 
----
+**Why local state here instead of Redux/Zustand?**
 
-### 4. Design system & theming
-
-**Choice**: Central theme context + design tokens in `src/theme`.
-
-- **Why this approach**  
-  - Healthcare UIs require a clean, consistent look; duplicating colors and spacing inline quickly leads to drift.  
-  - Supporting dark mode and future rebrands for GONEP should be a matter of updating theme tokens, not combing through every component.
-
-- **How it works**  
-  - `src/theme/colors.js` exposes semantic colors (e.g. primary, background, surface, success, error) instead of raw hex values scattered across the app.  
-  - `src/theme/ThemeContext.js` provides a `ThemeProvider` and `useTheme` hook.  
-  - The provider holds the current theme (light/dark) and exposes tokens to components.  
-  - `src/App.js` reads `isDark` from `useTheme` and maps it into the corresponding React Navigation theme (light vs dark) so that navigation containers and headers match the rest of the UI.
-
-This gives us a **single source of truth** for look and feel.
+- Auth routing here is simple and global.
+- For the current scope, local state is easier to read and debug than introducing a full store.
 
 ---
 
-### 5. UI layering (atoms, organisms, screens)
+### 3) Main shell behavior (`src/screens/MainShell.js`)
 
-**Choice**: Atomic-inspired layering: `atoms` → `organisms` → `screens`.
+`MainShell` is the in-app controller after login.
 
-- **Why this approach**  
-  - Encourages reuse and keeps screens focused on layout/data, not low-level styling.  
-  - Makes it easy to change a core UI element (e.g. button style) everywhere by editing one file.
+It owns:
 
-- **How it works**  
-  - `src/atoms/` contains the smallest UI building blocks: buttons, inputs, cards, badges, avatar.  
-  - `src/organisms/` contains composed structures such as `Sidebar`, `TopBar`, and `ScreenContainer`. These combine atoms into layout primitives.  
-  - `src/screens/` uses organisms + atoms to build full pages (Dashboard, Appointments, Orders, etc.) and wire them to navigation and data.
+- `page` - active screen
+- `sidebarOpen` - responsive nav behavior
+- `selectedAppointmentId` - detail-page context
+- `notificationsUnread` - topbar badge count
+- `userMenuOpen` - profile menu visibility
 
----
+**How navigation works**
 
-### 6. API, config, and mocks
+- Sidebar item click sets `page`.
+- `renderPage()` is a switch that returns the correct screen component.
+- Appointment detail uses a dedicated page key (`appointmentDetails`) and stores the selected ID.
 
-**Choice**: Central config in `src/config/env.js` plus an environment-routed API layer.
+**Why this approach instead of nested navigators for every section?**
 
-- **Why this approach**  
-  - Keeps environment-specific values (base URL, app name, feature flags) out of components.  
-  - Allows local development with mock data before the backend is ready, and easy switching to real endpoints later.
-
-- **How it works**  
-  - `src/config/env.js` exposes:  
-    - `APP_CONFIG` – app name and other static metadata.  
-    - `API_CONFIG` – base URL and standard headers.  
-    - `ENDPOINTS` – string paths for specific resources (`authLogin`, `authRegister`, `appointments`, etc.).  
-  - `src/api/index.js` selects one implementation layer based on `API_CONFIG.MODE` and re-exports a stable surface for screens/hooks.
-  - Layers:
-    - `src/api/mock/index.js` (in-memory mock behavior)
-    - `src/api/dev/index.js` (real HTTP calls)
-    - `src/api/prod/index.js` (real HTTP calls + stricter security guards)
-  - Shared fetch logic lives in `src/api/httpLayer.js` (timeouts, error mapping, production HTTPS guard).
-  - `src/mock/data.js` provides mock datasets consumed only by `src/api/mock/index.js`.
+- Simpler mental model for this app: one authenticated shell + controlled page switching.
+- Easier to inject shell-level UI (topbar, notifications badge, overlays) without complex navigator wiring.
 
 ---
 
-### 7. SEO (web-only concern)
+### 4) API architecture (`src/config/env.js`, `src/api/index.js`, `src/api/httpLayer.js`)
 
-**Choice**: Lightweight SEO integration using `react-helmet-async`.
+**`env.js` responsibilities**
 
-- **Why this approach**  
-  - The patient portal has a web build where setting page titles and basic meta tags improves clarity and search indexing.  
-  - We want SEO concerns decoupled from individual screen implementations.
+- Read public env values.
+- Build endpoint constants in one place (`ENDPOINTS`).
+- Export mode flags (`IS_MOCK`, `IS_DEV`, etc.).
 
-- **How it works**  
-  - `SeoProvider` wraps the app and provides the Helmet context.  
-  - `PageSeo` components set titles and key meta tags per screen.  
-  - This logic is a no-op on native platforms, but the same code paths can remain.
+**`api/index.js` responsibilities**
 
----
+- Select implementation layer by `API_CONFIG.MODE`.
+- Re-export a stable function surface (`getAppointments`, `getOrders`, etc.).
 
-### 8. Data & hooks
+**`httpLayer.js` responsibilities**
 
-**Choice**: Simple custom hooks per domain area (e.g. `useAppointments`).
+- Shared request/timeout/error behavior for dev/prod layers.
+- Keeps transport logic out of screens and hooks.
 
-- **Why this approach**  
-  - Encapsulates data fetching, transformation, and loading/error states.  
-  - Avoids duplicating API calls and mapping logic across multiple screens.
+**Why a mode-based router instead of `if (isMock)` checks inside screens?**
 
-- **How it works**  
-  - For each domain (appointments, orders, vitals, etc.), we can create a hook in `src/hooks`.  
-  - The hook uses the API or mock layer to fetch data and returns a shaped result plus state flags.  
-  - Screens call the hook and focus on rendering the result.
+- Screens stay clean and environment-agnostic.
+- Swapping mock <-> real API becomes a config change, not a feature rewrite.
 
 ---
 
-### 9. Future directions
+### 5) Function flow example (from click to API)
 
-- Replace mock API usage with real HTTP calls as the backend stabilizes.  
-- Introduce state management (e.g. React Query, Zustand, or Redux) if/when the data graph becomes complex.  
-- Add analytics and logging hooks at the navigation level (e.g. screen view tracking).  
-- Harden authentication with secure token storage and refresh flows for native builds.
+Example: open appointments screen.
 
-This architecture is intentionally **incremental**: you can ship a solid web experience today and progressively add robustness and native platforms over time.
+1. User clicks `Appointments` in sidebar.
+2. `MainShell` sets `page='appointments'`.
+3. `renderPage()` returns `AppointmentsScreen`.
+4. `AppointmentsScreen` calls `useAppointments`.
+5. `useAppointments` calls `getAppointments` from `src/api`.
+6. `src/api/index.js` forwards to mock/dev/prod layer.
+7. Data returns -> hook updates state -> screen re-renders.
+
+This is the core pattern used across records, vitals, chat, and notifications.
+
+---
+
+### 6) UI composition model
+
+- `atoms`: tiny reusable UI blocks (`Btn`, `Input`, `Card`, ...)
+- `organisms`: composed layout blocks (`Sidebar`, `TopBar`, `ScreenContainer`)
+- `screens`: feature pages that combine organisms + hooks + API functions
+
+**Why this split?**
+
+- Keeps styling reuse high.
+- Makes screen files focused on behavior, not repeated UI scaffolding.
+
+---
+
+### 7) Theme and SEO
+
+- `ThemeContext` provides `isDark`, tokens (`C`), and toggle behavior.
+- `App` maps theme mode to React Navigation theme to keep shell colors consistent.
+- `PageSeo` is rendered by `MainShell` so each page can define title/meta for web.
+
+---
+
+### 8) Quick codebase mental model
+
+- `App.js` decides **who sees what** (auth vs shell).
+- `MainShell.js` decides **which page renders**.
+- Hooks decide **when/how to fetch data**.
+- `src/api` decides **where data comes from** (mock/dev/prod).
+- Atoms/organisms decide **how UI looks consistently**.
 

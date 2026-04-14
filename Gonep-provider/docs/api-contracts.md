@@ -2,6 +2,24 @@
 
 All endpoints are prefixed with `EXPO_PUBLIC_PROVIDER_BASE_PATH` (default `/api/v1/provider`).
 
+## How the frontend uses these endpoints
+
+Provider screens and hooks call functions from `src/api/index.js` (not raw `fetch`).
+That facade forwards calls to `mock`, `dev`, or `prod` implementations.
+
+Examples:
+
+- `getInventory()` -> `GET /inventory/`
+- `addStock(payload)` -> `POST /inventory/{id}/add-stock/`
+- `getSupportTickets()` -> `GET /support-tickets/`
+- `savePosTransaction(payload)` -> `POST /pos-transactions/`
+
+Why this pattern:
+
+- consistent API function names across environments,
+- screen code stays clean and testable,
+- backend path changes are isolated to config/API layers.
+
 ## Auth
 `POST /auth/login/`  → `{ access_token, user }`
 

@@ -117,7 +117,7 @@ export function AppointmentDetailsScreen({ appointmentId, onBack }) {
           <Text style={[styles.value, { color: C.text }]}>{appointment.fee}</Text>
         </View>
 
-        <View style={styles.actions}>
+       {/* <View style={styles.actions}>
           {onBack && (
             <Btn
               label="Back"
@@ -135,7 +135,8 @@ export function AppointmentDetailsScreen({ appointmentId, onBack }) {
               onPress={reschedule}
             />
           )}
-        </View>
+        </View> */}
+
       </Card>
       </ScreenContainer>
 
