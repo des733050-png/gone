@@ -1,1 +1,0 @@
-export { EMRScreen } from './EMRScreen';

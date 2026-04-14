@@ -1,1 +1,0 @@
-export { InventoryScreen } from './InventoryScreen';

@@ -14,7 +14,7 @@ import { HospitalOnboardingScreen }  from './src/screens/auth/Onboarding';
 const Stack = createNativeStackNavigator();
 
 function RootNavigator() {
-  const { isDark, C, setUserKey } = useTheme();
+  const { isDark, C } = useTheme();
   const [user, setUser] = useState(null);
   // showOnboarding: true = new hospital registering (no existing account)
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -66,7 +66,7 @@ function RootNavigator() {
               <View style={{ flex: 1 }}>
                 <AuthScreen
                   {...props}
-                  onAuth={(u) => { setUserKey(u.email); setUser(u); }}
+                  onAuth={(u) => { setUser(u); }}
                   appName={APP_CONFIG.APP_NAME}
                   onRegister={() => setShowOnboarding(true)}
                 />

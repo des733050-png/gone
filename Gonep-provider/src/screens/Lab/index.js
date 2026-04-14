@@ -1,1 +1,0 @@
-export { LabScreen } from './LabScreen';

@@ -1,2 +1,2 @@
-export { EMRScreen }            from './EMRScreen';
-export { PatientDetailScreen }  from './PatientDetailScreen';
+export { EMRScreen }          from './EMRScreen';
+export { PatientDetailScreen } from './PatientDetailScreen';
