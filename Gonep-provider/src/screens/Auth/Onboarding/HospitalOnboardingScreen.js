@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from '../../../theme/ThemeContext';
 import { Btn } from '../../../atoms/Btn';
 import { Input } from '../../../atoms/Input';
 import { Icon } from '../../../atoms/Icon';
+import { submitFacilityApplication } from '../../../api';
 
 // Try to load the GONEP logo; falls back to icon if missing
 let GONEP_LOGO = null;
@@ -12,10 +14,10 @@ try { GONEP_LOGO = require('../../../../assets/GONEP Logo.png'); } catch {}
 const STEPS = ['Hospital details', 'Documents', 'Under review'];
 
 const DOC_TYPES = [
-  { id: 'reg',     label: 'Registration certificate',    desc: 'Ministry of Health registration document',       icon: 'file-text', required: true  },
-  { id: 'license', label: 'Facility operating licence',  desc: 'Current licence to operate as a health facility', icon: 'award',     required: true  },
-  { id: 'tax',     label: 'Tax compliance certificate',  desc: 'KRA tax compliance certificate',                  icon: 'briefcase', required: true  },
-  { id: 'accred',  label: 'Accreditation certificate',   desc: 'KENAS or relevant body accreditation (if any)',   icon: 'shield',    required: false },
+  { id: 'reg',     label: 'Registration certificate',    desc: 'Ministry of Health registration document (PDF)',       icon: 'file-text', required: true  },
+  { id: 'license', label: 'Facility operating licence',  desc: 'Current licence to operate as a health facility (PDF)', icon: 'award',     required: true  },
+  { id: 'tax',     label: 'Tax compliance certificate',  desc: 'KRA tax compliance certificate (PDF)',                  icon: 'briefcase', required: true  },
+  { id: 'accred',  label: 'Accreditation certificate',   desc: 'KENAS or relevant body accreditation, if any (PDF)',   icon: 'shield',    required: false },
 ];
 
 // onBack   — returns to auth screen without losing any filled form data
@@ -30,6 +32,8 @@ export function HospitalOnboardingScreen({ onComplete, onBack }) {
   });
   const [docs,   setDocs]   = useState({});
   const [errors, setErrors] = useState({});
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
@@ -52,8 +56,74 @@ export function HospitalOnboardingScreen({ onComplete, onBack }) {
   const validateStep1 = () =>
     DOC_TYPES.filter(d => d.required).every(d => docs[d.id]);
 
-  const fakeUpload = (docId) =>
-    setDocs(d => ({ ...d, [docId]: { name: `${docId}_document.pdf`, size: '1.2 MB' } }));
+  const pickDocument = async (docId) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (result?.canceled) return;
+      const file = result?.assets?.[0];
+      if (!file?.name || !file?.uri) return;
+      const extension = String(file.name).toLowerCase().split('.').pop();
+      const mimeType = file.mimeType || '';
+      if (extension !== 'pdf' || mimeType !== 'application/pdf') {
+        setSubmitError('Only PDF files are allowed.');
+        return;
+      }
+      setDocs((current) => ({
+        ...current,
+        [docId]: {
+          name: file.name,
+          size: file.size || 0,
+          mimeType: 'application/pdf',
+          uri: file.uri,
+          file: file.file || null,
+        },
+      }));
+      setSubmitError('');
+    } catch {
+      setSubmitError('Unable to access files on this device right now.');
+    }
+  };
+
+  const submitApplication = async () => {
+    if (!validateStep1()) return;
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      const data = new FormData();
+      data.append('name', form.name);
+      data.append('email', form.email);
+      data.append('phone', form.phone);
+      data.append('location', form.location);
+      data.append('registration_no', form.registration_no);
+      data.append('admin_name', form.admin_name);
+      data.append('admin_email', form.admin_email);
+
+      Object.entries(docs).forEach(([docKey, doc]) => {
+        if (!doc?.uri) return;
+        const fieldName = `doc_${docKey}`;
+        if (Platform.OS === 'web' && doc.file) {
+          data.append(fieldName, doc.file, doc.name);
+          return;
+        }
+        data.append(fieldName, {
+          uri: doc.uri,
+          name: doc.name,
+          type: doc.mimeType || 'application/octet-stream',
+        });
+      });
+
+      await submitFacilityApplication(data);
+      setStep(2);
+    } catch (error) {
+      setSubmitError(error?.message || 'Unable to submit application right now. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: C.bg }]}>
@@ -159,7 +229,7 @@ export function HospitalOnboardingScreen({ onComplete, onBack }) {
                       <Text style={[styles.docDesc, { color: C.textMuted }]}>{uploaded ? `Uploaded: ${uploaded.name}` : doc.desc}</Text>
                     </View>
                     <TouchableOpacity
-                      onPress={() => fakeUpload(doc.id)}
+                      onPress={() => pickDocument(doc.id)}
                       style={[styles.uploadBtn, { borderColor: uploaded ? C.success : C.primary, backgroundColor: uploaded ? `${C.success}12` : C.primaryLight }]}
                     >
                       <Icon name={uploaded ? 'check' : 'upload'} lib="feather" size={13} color={uploaded ? C.success : C.primary} style={{ marginRight: 4 }} />
@@ -176,9 +246,22 @@ export function HospitalOnboardingScreen({ onComplete, onBack }) {
                 </View>
               )}
 
+              {submitError ? (
+                <View style={[styles.warningBox, { backgroundColor: C.dangerLight, borderColor: C.danger }]}>
+                  <Icon name="alert-circle" lib="feather" size={14} color={C.danger} style={{ marginRight: 8 }} />
+                  <Text style={{ color: C.danger, fontSize: 12, flex: 1 }}>{submitError}</Text>
+                </View>
+              ) : null}
+
               <View style={styles.btnRow}>
                 <Btn label="Back" variant="ghost" onPress={() => setStep(0)} style={{ marginRight: 8 }} />
-                <Btn label="Submit for review" style={{ flex: 1 }} disabled={!validateStep1()} onPress={() => setStep(2)} />
+                <Btn
+                  label={submitting ? 'Submitting…' : 'Submit for review'}
+                  style={{ flex: 1 }}
+                  disabled={!validateStep1() || submitting}
+                  onPress={submitApplication}
+                  loading={submitting}
+                />
               </View>
             </View>
           )}

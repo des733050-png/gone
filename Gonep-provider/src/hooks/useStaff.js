@@ -1,17 +1,32 @@
 // ─── hooks/useStaff.js ───────────────────────────────────────────────────────
 import { useState, useEffect, useCallback } from 'react';
-import { MOCK_STAFF } from '../mock/data';
-import { suspendStaff, reactivateStaff, appendLog } from '../api';
+import { suspendStaff, reactivateStaff, appendLog, getStaff } from '../api';
 import { ROLE_FILTER_OPTIONS } from '../constants/staff';
 
-export function useStaff(propFilter) {
-  const [staffList, setStaffList] = useState(MOCK_STAFF.map(m => ({ ...m, suspended: false })));
+export function useStaff(propFilter, user) {
+  const [staffList, setStaffList] = useState([]);
   const [filter,    setFilter]    = useState(propFilter || 'all');
   const [search,    setSearch]    = useState('');
   const [addModal,  setAddModal]  = useState(false);
   const [editModal, setEditModal] = useState({ visible: false, member: null });
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
 
   useEffect(() => { if (propFilter) setFilter(propFilter); }, [propFilter]);
+  const loadStaff = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const rows = await getStaff();
+      setStaffList((rows || []).map((row) => ({ ...row, suspended: !!row.suspended })));
+    } catch (err) {
+      setError(err?.message || 'Unable to load staff.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadStaff(); }, [loadStaff]);
 
   const filtered = staffList.filter(m => {
     const matchRole   = filter === 'all' || m.role === filter;
@@ -29,25 +44,30 @@ export function useStaff(propFilter) {
     await suspendStaff(id);
     const m = staffList.find(x => x.id === id);
     appendLog({
-      staff: 'Admin', staff_id: 'usr-HA-001', role: 'hospital_admin',
+      staff: user ? `${user.first_name} ${user.last_name}` : 'Admin',
+      staff_id: user?.id, role: user?.role || 'hospital_admin',
       module: 'Staff', action: 'Account suspended',
       detail: `${m?.first_name} ${m?.last_name}`, type: 'staff',
     });
     setStaffList(prev => prev.map(x => x.id === id ? { ...x, suspended: true } : x));
-  }, [staffList]);
+  }, [staffList, user]);
 
   const handleReactivate = useCallback(async (id) => {
     await reactivateStaff(id);
     const m = staffList.find(x => x.id === id);
     appendLog({
-      staff: 'Admin', staff_id: 'usr-HA-001', role: 'hospital_admin',
+      staff: user ? `${user.first_name} ${user.last_name}` : 'Admin',
+      staff_id: user?.id, role: user?.role || 'hospital_admin',
       module: 'Staff', action: 'Account reactivated',
       detail: `${m?.first_name} ${m?.last_name}`, type: 'staff',
     });
     setStaffList(prev => prev.map(x => x.id === id ? { ...x, suspended: false } : x));
-  }, [staffList]);
+  }, [staffList, user]);
 
-  const addMember  = useCallback((m) => setStaffList(prev => [m, ...prev]), []);
+  const addMember = useCallback((m) => {
+    const { invitation: _inv, ...safe } = m || {};
+    setStaffList((prev) => [{ ...safe }, ...prev]);
+  }, []);
   const editMember = useCallback((updated) =>
     setStaffList(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x))
   , []);
@@ -57,6 +77,7 @@ export function useStaff(propFilter) {
     search, setSearch,
     addModal, setAddModal,
     editModal, setEditModal,
+    loading, error,
     filtered, counts,
     handleSuspend, handleReactivate,
     addMember, editMember,

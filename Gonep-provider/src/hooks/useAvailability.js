@@ -4,24 +4,32 @@ import {
   getAvailability, addAvailabilitySlot,
   removeAvailabilitySlot, toggleBlockDay, appendLog,
 } from '../api';
-import { MOCK_STAFF } from '../mock/data';
 import { isOwnDataOnly } from '../config/roles';
 
 export function useAvailability(user) {
   const [availability, setAvailability] = useState({});
   const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState('');
   const [selectedDoc,  setSelectedDoc]  = useState(null);
   const [addModalVis,  setAddModalVis]  = useState(false);
 
   const isDoctor = isOwnDataOnly(user?.role);
   const isRec    = user?.role === 'receptionist';
-  const doctors  = MOCK_STAFF.filter(s => s.role === 'doctor');
+  const doctors  = Object.values(availability || {}).map((item) => ({
+    id: item.doctor_id,
+    first_name: String(item.doctor_name || '').split(' ').slice(0, -1).join(' ') || item.doctor_name,
+    last_name: String(item.doctor_name || '').split(' ').slice(-1).join(''),
+    specialty: item.specialty || 'Doctor',
+  }));
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
+      setError('');
       const data = await getAvailability();
       setAvailability(data);
+    } catch (err) {
+      setError(err?.message || 'Unable to load availability.');
     } finally {
       setLoading(false);
     }
@@ -68,6 +76,7 @@ export function useAvailability(user) {
 
   return {
     availability, loading,
+    error,
     selectedDoc, setSelectedDoc,
     addModalVis, setAddModalVis,
     isDoctor, isRec, doctors,

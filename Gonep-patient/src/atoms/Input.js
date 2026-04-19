@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useResponsive } from '../theme/responsive';
 import { Icon } from './Icon';
@@ -19,6 +19,8 @@ export function Input({
   const { C } = useTheme();
   const { width } = useResponsive();
   const [focused, setFocused] = useState(false);
+  const [showSecureText, setShowSecureText] = useState(false);
+  const shouldMask = Boolean(secureTextEntry) && !showSecureText;
 
   const scale = width < 360 ? 1.12 : width < 640 ? 1.06 : 1;
 
@@ -44,7 +46,7 @@ export function Input({
           placeholder={placeholder}
           value={value}
           onChangeText={onChangeText}
-          secureTextEntry={secureTextEntry}
+          secureTextEntry={shouldMask}
           keyboardType={keyboardType}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
@@ -56,11 +58,26 @@ export function Input({
               backgroundColor: C.inputBg,
               color: C.text,
               paddingLeft: icon ? 38 : 14,
+              paddingRight: secureTextEntry ? 44 : 14,
               fontSize: Math.round(15 * scale),
               paddingVertical: Math.round(12 * scale),
             },
           ]}
         />
+        {secureTextEntry ? (
+          <TouchableOpacity
+            onPress={() => setShowSecureText((value) => !value)}
+            style={styles.toggleButton}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <Icon
+              name={showSecureText ? 'eye-off' : 'eye'}
+              lib="feather"
+              size={18}
+              color={focused ? C.primary : C.textMuted}
+            />
+          </TouchableOpacity>
+        ) : null}
       </View>
       {error ? (
         <View style={styles.errorRow}>
@@ -96,6 +113,14 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: 10,
     paddingRight: 14,
+  },
+  toggleButton: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    zIndex: 1,
   },
   error: {
     marginTop: 2,

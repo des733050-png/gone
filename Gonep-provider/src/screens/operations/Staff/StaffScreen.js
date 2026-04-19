@@ -22,15 +22,15 @@ const ADMIN_USER = {
   role: 'hospital_admin', facility: 'Nairobi General Hospital', hospital_id: 'hosp-001',
 };
 
-export function StaffScreen({ filter: propFilter }) {
+export function StaffScreen({ filter: propFilter, user }) {
   const { C } = useTheme();
-  const staff = useStaff(propFilter);
+  const staff = useStaff(propFilter, user);
 
   return (
     <ScreenContainer scroll>
       <PageHeader
         title="Staff & Roles"
-        subtitle={`${staff.staffList.length} team members · Nairobi General Hospital`}
+        subtitle={`${staff.staffList.length} team members`}
         action={
           <Btn
             label="Add member"
@@ -69,6 +69,8 @@ export function StaffScreen({ filter: propFilter }) {
         onChangeText={staff.setSearch}
         placeholder="Search by name or email…"
       />
+      {staff.loading && <Text style={{ color: C.textMuted, marginBottom: 10 }}>Loading staff...</Text>}
+      {!!staff.error && <Text style={{ color: C.danger, marginBottom: 10 }}>{staff.error}</Text>}
 
       {staff.filtered.map(member => (
         <StaffCard
@@ -90,6 +92,7 @@ export function StaffScreen({ filter: propFilter }) {
       {/* Modals */}
       <AddMemberModal
         visible={staff.addModal}
+        user={user}
         onClose={() => staff.setAddModal(false)}
         onAdd={staff.addMember}
       />
@@ -97,6 +100,7 @@ export function StaffScreen({ filter: propFilter }) {
         <EditMemberModal
           visible={staff.editModal.visible}
           member={staff.editModal.member}
+          user={user}
           onClose={() => staff.setEditModal({ visible: false, member: null })}
           onSave={staff.editMember}
         />

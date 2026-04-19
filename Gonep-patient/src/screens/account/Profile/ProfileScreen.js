@@ -7,12 +7,15 @@ import { Avatar } from '../../../atoms/Avatar';
 import { Input } from '../../../atoms/Input';
 import { Btn } from '../../../atoms/Btn';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
+import { updateCurrentUser } from '../../../api';
 
 export function ProfileScreen({ user, onUpdateUser }) {
   const { C } = useTheme();
   const [editing, setEditing] = useState(false);
   const [photoUri, setPhotoUri] = useState(user.avatar || null);
   const [pendingPhotoUri, setPendingPhotoUri] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [draft, setDraft] = useState({
     first_name: user.first_name,
     last_name: user.last_name,
@@ -39,18 +42,35 @@ export function ProfileScreen({ user, onUpdateUser }) {
     setDraft((d) => ({ ...d, [key]: value }));
   };
 
-  const save = () => {
+  const save = async () => {
     const nextAvatar = pendingPhotoUri || photoUri || user.avatar || null;
-    if (onUpdateUser) {
-      onUpdateUser({
-        ...user,
-        ...draft,
-        avatar: nextAvatar || undefined,
-      });
+    try {
+      setSaving(true);
+      setSaveError('');
+      const payload = {
+        first_name: draft.first_name,
+        last_name: draft.last_name,
+        email: draft.email,
+        phone: draft.phone,
+        address: draft.address,
+        date_of_birth: draft.date_of_birth,
+      };
+      const updated = await updateCurrentUser(payload);
+      if (onUpdateUser) {
+        onUpdateUser({
+          ...user,
+          ...updated,
+          avatar: nextAvatar || undefined,
+        });
+      }
+      setPhotoUri(nextAvatar || null);
+      setPendingPhotoUri(null);
+      setEditing(false);
+    } catch (error) {
+      setSaveError(error?.message || 'Unable to save profile right now.');
+    } finally {
+      setSaving(false);
     }
-    setPhotoUri(nextAvatar || null);
-    setPendingPhotoUri(null);
-    setEditing(false);
   };
 
   const pickImageFromLibrary = async () => {
@@ -225,7 +245,7 @@ export function ProfileScreen({ user, onUpdateUser }) {
               marginTop: 16,
             }}
           >
-            <Btn label="Save Changes" onPress={save} style={{ flex: 1 }} />
+            <Btn label={saving ? 'Saving...' : 'Save Changes'} onPress={save} style={{ flex: 1 }} />
             <Btn
               label="Cancel"
               onPress={() => {
@@ -235,6 +255,9 @@ export function ProfileScreen({ user, onUpdateUser }) {
               variant="ghost"
             />
           </View>
+          {saveError ? (
+            <Text style={{ marginTop: 10, color: C.danger, fontSize: 12 }}>{saveError}</Text>
+          ) : null}
         </Card>
       ) : (
         <Card>

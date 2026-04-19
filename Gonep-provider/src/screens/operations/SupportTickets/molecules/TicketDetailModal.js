@@ -6,7 +6,6 @@ import { Badge } from '../../../../atoms/Badge';
 import { BottomSheet } from '../../../../molecules/BottomSheet';
 import { FormField }    from '../../../../molecules/FormField';
 import { useTheme } from '../../../../theme/ThemeContext';
-import { appendLog } from '../../../../api';
 import {
   STATUS_LABEL, STATUS_COLOR, PRIORITY_COLOR, canRespond,
 } from '../../../../constants/support';
@@ -15,35 +14,38 @@ export function TicketDetailModal({ visible, ticket, user, onClose, onUpdate }) 
   const { C } = useTheme();
   const [response, setResponse] = useState('');
   const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState('');
 
   if (!ticket) return null;
   const responder = canRespond(user?.role);
 
   const handleRespond = async () => {
     if (!response.trim()) return;
-    setSaving(true);
-    await new Promise(r => setTimeout(r, 300));
-    const newResp = {
-      by:   `${user.first_name} ${user.last_name}`,
-      role: user.role,
-      ts:   'Just now',
-      text: response.trim(),
-    };
-    appendLog({
-      staff: `${user.first_name} ${user.last_name}`, staff_id: user.id, role: user.role,
-      module: 'Support', action: 'Ticket response added', detail: ticket.title, type: 'support',
-    });
-    setSaving(false);
-    setResponse('');
-    onUpdate(ticket.id, { responses: [...(ticket.responses || []), newResp] });
+    try {
+      setSaving(true);
+      setError('');
+      const newResp = {
+        by:   `${user.first_name} ${user.last_name}`,
+        role: user.role,
+        ts:   new Date().toISOString(),
+        text: response.trim(),
+      };
+      await onUpdate(ticket.id, { responses: [...(ticket.responses || []), newResp] });
+      setResponse('');
+    } catch (err) {
+      setError(err?.message || 'Unable to send response.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleStatus = (newStatus) => {
-    appendLog({
-      staff: `${user.first_name} ${user.last_name}`, staff_id: user.id, role: user.role,
-      module: 'Support', action: `Ticket ${newStatus}`, detail: ticket.title, type: 'support',
-    });
-    onUpdate(ticket.id, { status: newStatus });
+  const handleStatus = async (newStatus) => {
+    try {
+      setError('');
+      await onUpdate(ticket.id, { status: newStatus });
+    } catch (err) {
+      setError(err?.message || 'Unable to update ticket status.');
+    }
   };
 
   return (
@@ -93,6 +95,7 @@ export function TicketDetailModal({ visible, ticket, user, onClose, onUpdate }) 
         )}
 
         {/* Response input — responders only */}
+        {!!error && <Text style={{ color: C.danger, fontSize: 12, marginTop: 8 }}>{error}</Text>}
         {responder && ticket.status !== 'closed' && (
           <View style={{ marginTop: 14 }}>
             <FormField

@@ -18,6 +18,7 @@ export function Sidebar({
   open,
   onClose,
   overlay = false,
+  notificationsUnread = 0,
 }) {
   const { C } = useTheme();
   const insets = useSafeAreaInsets();
@@ -98,7 +99,10 @@ export function Sidebar({
               >
                 {item.label}
               </Text>
-              {item.id === 'notifications' && <Badge label="2" color="danger" />}
+              {!item.integrated ? <Badge label="NI" color="warning" /> : null}
+              {item.id === 'notifications' && notificationsUnread > 0 ? (
+                <Badge label={String(notificationsUnread)} color="danger" />
+              ) : null}
             </TouchableOpacity>
           );
         })}

@@ -9,14 +9,34 @@ import { Input } from '../../../atoms/Input';
 import { Icon } from '../../../atoms/Icon';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
 import { ROLE_LABELS, ROLE_COLORS } from '../../../config/roles';
+import { updateCurrentUser } from '../../../api';
 
 export function ProfileScreen({ user, onUpdateUser }) {
   const { C } = useTheme();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ ...user });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const save = () => { if (onUpdateUser) onUpdateUser(form); setEditing(false); };
+  const save = async () => {
+    try {
+      setSaving(true);
+      setError('');
+      const updated = await updateCurrentUser({
+        first_name: form.first_name,
+        last_name: form.last_name,
+        phone: form.phone || '',
+        specialty: form.specialty || '',
+      });
+      if (onUpdateUser) onUpdateUser(updated || form);
+      setEditing(false);
+    } catch (err) {
+      setError(err?.message || 'Unable to save profile changes.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const roleColorKey = ROLE_COLORS[user.role] || 'primary';
   const roleColorMap = {
@@ -51,6 +71,11 @@ export function ProfileScreen({ user, onUpdateUser }) {
       </Card>
 
       {/* Info grid */}
+      {!!error && (
+        <Card style={styles.infoCard}>
+          <Text style={{ color: C.danger, fontSize: 12 }}>{error}</Text>
+        </Card>
+      )}
       {!editing && (
         <Card style={styles.infoCard}>
           <Text style={[styles.sectionTitle, { color: C.text }]}>Account details</Text>
@@ -94,7 +119,7 @@ export function ProfileScreen({ user, onUpdateUser }) {
             <Input label="Specialty" value={form.specialty || ''} onChangeText={v => set('specialty', v)} icon="activity" />
           )}
           <View style={styles.editActions}>
-            <Btn label="Save changes" onPress={save} full />
+            <Btn label={saving ? 'Saving...' : 'Save changes'} onPress={save} loading={saving} full />
           </View>
         </Card>
       )}

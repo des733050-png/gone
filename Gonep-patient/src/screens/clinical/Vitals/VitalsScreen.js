@@ -6,11 +6,17 @@ import { Card } from '../../../atoms/Card';
 import { Icon } from '../../../atoms/Icon';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
 import { useVitals } from '../../../hooks/useVitals';
+import {
+  getPatientModuleIntegrationReason,
+  isPatientModuleIntegrated,
+} from '../../../config/patientModules';
 
 export function VitalsScreen() {
   const { C } = useTheme();
   const { cardColumns } = useResponsive();
-  const { vitals } = useVitals();
+  const integrated = isPatientModuleIntegrated('vitals');
+  const integrationReason = getPatientModuleIntegrationReason('vitals');
+  const { vitals } = useVitals(integrated);
 
   const columns = Math.min(cardColumns, 3);
   const basis =
@@ -20,6 +26,24 @@ export function VitalsScreen() {
 
   return (
     <ScreenContainer scroll contentContainerStyle={{ paddingBottom: 24 }}>
+      {!integrated ? (
+        <Card>
+          <Text style={{ color: C.text, fontWeight: '700', marginBottom: 6 }}>
+            Not integrated yet
+          </Text>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>
+            {integrationReason || 'Vitals API is not yet available on backend for this environment.'}
+          </Text>
+        </Card>
+      ) : null}
+      {integrated && vitals.length === 0 ? (
+        <Card>
+          <Text style={{ color: C.text, fontWeight: '700', marginBottom: 6 }}>No vitals yet</Text>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>
+            Your health measurements will appear here once recorded.
+          </Text>
+        </Card>
+      ) : null}
       <View style={styles.grid}>
         {vitals.map((v, idx) => (
           <Card

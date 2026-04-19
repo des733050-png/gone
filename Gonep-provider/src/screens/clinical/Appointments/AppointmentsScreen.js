@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Modal,
-  ScrollView, TextInput, ActivityIndicator,
+  ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
 import { Card } from '../../../atoms/Card';
@@ -13,27 +13,43 @@ import { ScreenContainer } from '../../../organisms/ScreenContainer';
 import { useAppointments } from '../../../hooks/useAppointments';
 import { isOwnDataOnly } from '../../../config/roles';
 import { MOCK_STAFF } from '../../../mock/data';
-import { appendLog } from '../../../api';
+import { appendLog, getStaff } from '../../../api';
+import { CreateAppointmentModal } from './molecules/CreateAppointmentModal';
+import { appointmentMatchesFilters, toggleSetMember } from '../../../utils/appointmentScreenFilters';
 
-const FILTERS = [
-  { id: 'all',        label: 'All'         },
-  { id: 'today',      label: 'Today'       },
-  { id: 'upcoming',   label: 'Upcoming'    },
-  { id: 'confirmed',  label: 'Confirmed'   },
-  { id: 'unassigned', label: 'Unassigned'  },
+const STATUS_CHIPS = [
+  { id: 'cancelled', label: 'Cancelled' },
+  { id: 'completed', label: 'Completed' },
+  { id: 'confirmed', label: 'Confirmed' },
+  { id: 'unassigned', label: 'Unassigned' },
+  { id: 'pending', label: 'Pending' },
 ];
 
-const statusColor = s => s === 'confirmed' ? 'success' : s === 'unassigned' ? 'danger' : 'warning';
+const DATE_CHIPS = [
+  { id: 'today', label: 'Today' },
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'this_week', label: 'This Week' },
+  { id: 'this_month', label: 'This Month' },
+];
 
-function applyFilter(list, filter) {
-  switch (filter) {
-    case 'today':      return list.filter(a => a.date === 'Today');
-    case 'upcoming':   return list.filter(a => a.date !== 'Today' && a.status !== 'unassigned');
-    case 'confirmed':  return list.filter(a => a.status === 'confirmed');
-    case 'unassigned': return list.filter(a => a.status === 'unassigned');
-    default:           return list;
-  }
-}
+const TYPE_CHIPS = [
+  { id: 'home_visit', label: 'Home Visit' },
+  { id: 'in_facility', label: 'In Facility' },
+  { id: 'chat', label: 'Chat' },
+];
+
+const statusColor = (s) => {
+  if (s === 'confirmed') return 'success';
+  if (s === 'completed') return 'success';
+  if (s === 'cancelled') return 'danger';
+  if (s === 'unassigned') return 'danger';
+  return 'warning';
+};
+
+const statusLabel = (s) =>
+  ({ cancelled: 'Cancelled', completed: 'Completed', confirmed: 'Confirmed', unassigned: 'Unassigned', pending: 'Pending' }[
+    String(s || '').toLowerCase()
+  ] || String(s || ''));
 
 // ─── Assign Doctor Modal ──────────────────────────────────────────────────────
 function AssignModal({ visible, apt, onClose, onAssigned, user }) {
@@ -43,7 +59,6 @@ function AssignModal({ visible, apt, onClose, onAssigned, user }) {
 
   const handleAssign = async (doc) => {
     setSaving(true);
-    // Optimistic — real API call would go here
     await new Promise(r => setTimeout(r, 400));
     appendLog({
       staff: `${user.first_name} ${user.last_name}`, staff_id: user.id, role: user.role,
@@ -86,41 +101,156 @@ function AssignModal({ visible, apt, onClose, onAssigned, user }) {
   );
 }
 
+function FilterChipRow({ items, selectedSet, dateMode, onToggleStatus, onToggleType, onPickDate }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+      {items.map((item) => {
+        const isDate = DATE_CHIPS.some((d) => d.id === item.id);
+        const active = isDate ? dateMode === item.id : selectedSet.has(item.id);
+        return (
+          <Btn
+            key={item.id}
+            label={item.label}
+            variant={active ? 'primary' : 'ghost'}
+            size="sm"
+            onPress={() => {
+              if (isDate) onPickDate(item.id);
+              else if (STATUS_CHIPS.some((x) => x.id === item.id)) onToggleStatus(item.id);
+              else onToggleType(item.id);
+            }}
+            style={{ marginRight: 8 }}
+          />
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 // ─── AppointmentsScreen ───────────────────────────────────────────────────────
 export function AppointmentsScreen({ user, filter: propFilter }) {
   const { C } = useTheme();
   const { appointments, loading, reload } = useAppointments();
-  const [filter,      setFilter]      = useState(propFilter || 'all');
+  const [statusFilters, setStatusFilters] = useState(() => new Set());
+  const [typeFilters, setTypeFilters] = useState(() => new Set());
+  const [dateMode, setDateMode] = useState('');
+  const [doctorFilter, setDoctorFilter] = useState('');
+  const [doctorOptions, setDoctorOptions] = useState([]);
   const [assignModal, setAssignModal] = useState({ visible: false, apt: null });
-  // Local state for assignments (so UI updates without a full reload)
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [successToast, setSuccessToast] = useState('');
   const [assignments, setAssignments] = useState({});
 
-  const ownOnly     = isOwnDataOnly(user?.role);
-  const isRec       = user?.role === 'receptionist';
-  const isAdmin     = user?.role === 'hospital_admin';
+  const ownOnly = isOwnDataOnly(user?.role);
+  const isRec = user?.role === 'receptionist';
+  const isAdmin = user?.role === 'hospital_admin';
+  const canBookAppointment = ['hospital_admin', 'facility_admin', 'doctor', 'receptionist'].includes(
+    String(user?.role || '')
+  );
   const showUnassigned = isRec || isAdmin;
+  const showDoctorFilter = ['hospital_admin', 'facility_admin', 'receptionist'].includes(String(user?.role || ''));
 
-  // Sync filter from sidebar sub-item
-  useEffect(() => { if (propFilter) setFilter(propFilter); }, [propFilter]);
+  useEffect(() => {
+    if (!propFilter || propFilter === 'all') {
+      setStatusFilters(new Set());
+      setTypeFilters(new Set());
+      setDateMode('');
+      setDoctorFilter('');
+      return;
+    }
+    setTypeFilters(new Set());
+    setDoctorFilter('');
+    if (propFilter === 'today') {
+      setStatusFilters(new Set());
+      setDateMode('today');
+    } else if (propFilter === 'upcoming') {
+      setStatusFilters(new Set());
+      setDateMode('upcoming');
+    } else if (propFilter === 'unassigned') {
+      setDateMode('');
+      setStatusFilters(new Set(['unassigned']));
+    } else if (propFilter === 'confirmed') {
+      setDateMode('');
+      setStatusFilters(new Set(['confirmed']));
+    }
+  }, [propFilter]);
+
+  useEffect(() => {
+    if (!showDoctorFilter) return undefined;
+    let cancelled = false;
+    getStaff()
+      .then((rows) => {
+        if (!cancelled) setDoctorOptions((rows || []).filter((r) => r.role === 'doctor'));
+      })
+      .catch(() => {
+        if (!cancelled) setDoctorOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showDoctorFilter]);
 
   const visible = appointments.map(a => ({
     ...a,
     doctor_id: assignments[a.id] || a.doctor_id,
-    status:    assignments[a.id] ? 'confirmed' : a.status,
+    status: assignments[a.id] ? 'confirmed' : a.status,
   })).filter(a => {
     if (ownOnly) return a.doctor_id === user?.id;
     return true;
   });
 
-  const filtered = applyFilter(visible, filter);
+  const filtered = useMemo(
+    () =>
+      visible.filter((a) =>
+        appointmentMatchesFilters(a, {
+          statuses: statusFilters,
+          types: typeFilters,
+          dateMode,
+          doctorId: doctorFilter,
+        })
+      ),
+    [visible, statusFilters, typeFilters, dateMode, doctorFilter]
+  );
+
   const unassignedCount = visible.filter(a => a.status === 'unassigned').length;
+
+  const hasActiveFilters =
+    statusFilters.size > 0 || typeFilters.size > 0 || Boolean(dateMode) || Boolean(doctorFilter);
+
+  const clearFilters = useCallback(() => {
+    setStatusFilters(new Set());
+    setTypeFilters(new Set());
+    setDateMode('');
+    setDoctorFilter('');
+  }, []);
+
+  const toggleStatus = useCallback((id) => {
+    setStatusFilters((prev) => toggleSetMember(prev, id));
+  }, []);
+
+  const toggleType = useCallback((id) => {
+    setTypeFilters((prev) => toggleSetMember(prev, id));
+  }, []);
+
+  const pickDateMode = useCallback((id) => {
+    setDateMode((prev) => (prev === id ? '' : id));
+  }, []);
 
   const handleAssigned = useCallback((aptId, docId) => {
     setAssignments(prev => ({ ...prev, [aptId]: docId }));
   }, []);
 
-  const visibleFilters = FILTERS.filter(f =>
-    f.id !== 'unassigned' || showUnassigned
+  useEffect(() => {
+    if (!successToast) return undefined;
+    const timer = setTimeout(() => setSuccessToast(''), 2500);
+    return () => clearTimeout(timer);
+  }, [successToast]);
+
+  const statusChipsWithCount = useMemo(
+    () =>
+      STATUS_CHIPS.map((c) =>
+        c.id === 'unassigned' ? { ...c, label: `Unassigned (${unassignedCount})` } : c
+      ),
+    [unassignedCount]
   );
 
   if (loading) {
@@ -140,18 +270,86 @@ export function AppointmentsScreen({ user, filter: propFilter }) {
         </View>
       )}
 
-      {/* Filter tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
-        {visibleFilters.map(f => (
-          <Btn key={f.id}
-            label={f.id === 'unassigned' ? `Unassigned (${unassignedCount})` : f.label}
-            variant={filter === f.id ? 'primary' : 'ghost'}
-            size="sm"
-            onPress={() => setFilter(f.id)}
-            style={{ marginRight: 8 }}
-          />
-        ))}
-      </ScrollView>
+      {!!successToast && (
+        <View style={[s.scopeNote, { backgroundColor: C.successLight, borderColor: C.success }]}>
+          <Icon name="check-circle" lib="feather" size={13} color={C.success} style={{ marginRight: 6 }} />
+          <Text style={{ color: C.success, fontSize: 12 }}>{successToast}</Text>
+        </View>
+      )}
+      {canBookAppointment && (
+        <Btn
+          label="+ Book Appointment"
+          onPress={() => setCreateModalVisible(true)}
+          icon={<Icon name="plus" lib="feather" size={14} color="#fff" />}
+          style={{ marginBottom: 10, alignSelf: 'flex-start' }}
+          size="sm"
+        />
+      )}
+
+      <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', marginBottom: 6 }}>STATUS</Text>
+      <FilterChipRow
+        items={statusChipsWithCount.filter((c) => (c.id === 'unassigned' ? showUnassigned : true))}
+        selectedSet={statusFilters}
+        dateMode=""
+        onToggleStatus={toggleStatus}
+        onToggleType={toggleType}
+        onPickDate={() => {}}
+      />
+
+      <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', marginBottom: 6 }}>DATE</Text>
+      <FilterChipRow
+        items={DATE_CHIPS}
+        selectedSet={statusFilters}
+        dateMode={dateMode}
+        onToggleStatus={toggleStatus}
+        onToggleType={toggleType}
+        onPickDate={pickDateMode}
+      />
+
+      <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', marginBottom: 6 }}>TYPE</Text>
+      <FilterChipRow
+        items={TYPE_CHIPS}
+        selectedSet={typeFilters}
+        dateMode=""
+        onToggleStatus={toggleStatus}
+        onToggleType={toggleType}
+        onPickDate={() => {}}
+      />
+
+      {showDoctorFilter && doctorOptions.length > 0 && (
+        <>
+          <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', marginBottom: 6 }}>BY DOCTOR</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+            <Btn
+              label="All doctors"
+              variant={doctorFilter ? 'ghost' : 'primary'}
+              size="sm"
+              onPress={() => setDoctorFilter('')}
+              style={{ marginRight: 8 }}
+            />
+            {doctorOptions.map((doc) => {
+              const label = `${doc.first_name || ''} ${doc.last_name || ''}`.trim() || doc.email || 'Doctor';
+              const id = String(doc.id);
+              return (
+                <Btn
+                  key={id}
+                  label={label}
+                  variant={doctorFilter === id ? 'primary' : 'ghost'}
+                  size="sm"
+                  onPress={() => setDoctorFilter((prev) => (prev === id ? '' : id))}
+                  style={{ marginRight: 8 }}
+                />
+              );
+            })}
+          </ScrollView>
+        </>
+      )}
+
+      {hasActiveFilters && (
+        <TouchableOpacity onPress={clearFilters} style={{ marginBottom: 12, alignSelf: 'flex-start' }}>
+          <Text style={{ color: C.primary, fontSize: 13, fontWeight: '600' }}>Clear filters</Text>
+        </TouchableOpacity>
+      )}
 
       {filtered.length === 0 && (
         <View style={s.empty}>
@@ -173,7 +371,7 @@ export function AppointmentsScreen({ user, filter: propFilter }) {
               <Text style={[s.reason, { color: C.textSec }]}>{a.reason}</Text>
             </View>
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
-              <Badge label={a.status === 'unassigned' ? 'Unassigned' : a.status} color={statusColor(a.status)} />
+              <Badge label={statusLabel(a.status)} color={statusColor(a.status)} />
               <Text style={[s.phone, { color: C.textMuted }]}>{a.phone}</Text>
             </View>
           </View>
@@ -208,6 +406,15 @@ export function AppointmentsScreen({ user, filter: propFilter }) {
         onClose={() => setAssignModal({ visible: false, apt: null })}
         onAssigned={handleAssigned}
       />
+      <CreateAppointmentModal
+        visible={createModalVisible}
+        user={user}
+        onClose={() => setCreateModalVisible(false)}
+        onSuccess={async (message) => {
+          setSuccessToast(message || 'Appointment booked successfully.');
+          await reload();
+        }}
+      />
     </ScreenContainer>
   );
 }
@@ -225,7 +432,6 @@ const s = StyleSheet.create({
   actions:    { flexDirection: 'row', flexWrap: 'wrap' },
   empty:      { alignItems: 'center', paddingVertical: 48, gap: 12 },
   emptyText:  { fontSize: 14 },
-  // Modal
   backdrop:   { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet:      { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, borderWidth: 1, paddingBottom: 36 },
   handle:     { width: 36, height: 4, borderRadius: 2, backgroundColor: '#ccc', alignSelf: 'center', marginBottom: 16 },

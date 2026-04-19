@@ -9,7 +9,7 @@
 
 import { API_CONFIG } from '../config/env';
 
-const MODE = API_CONFIG.MODE; // 'mock' | 'development' | 'staging' | 'production'
+const MODE = String(API_CONFIG.MODE || '').trim().toLowerCase(); // 'mock' | 'development' | 'staging' | 'production'
 
 // Lazy-require each environment so bundlers can tree-shake unused layers.
 // Using conditional require (not dynamic import) keeps it synchronous and
@@ -19,9 +19,13 @@ if (MODE === 'mock') {
   layer = require('./mock/index');
 } else if (MODE === 'development') {
   layer = require('./dev/index');
-} else {
+} else if (MODE === 'staging' || MODE === 'production') {
   // staging + production both use the prod layer (auth tokens, error reporting)
   layer = require('./prod/index');
+} else {
+  throw new Error(
+    `[Gonep API] Unsupported MODE "${MODE}". Refusing to fall back to another layer.`
+  );
 }
 
 // ─── Re-export every function from the chosen layer ──────────────────────────
@@ -29,15 +33,25 @@ if (MODE === 'mock') {
 // then it will automatically appear here.
 
 export const getAppointments          = layer.getAppointments;
+export const createAppointment       = layer.createAppointment;
+export const loginProvider            = layer.loginProvider;
+export const submitFacilityApplication = layer.submitFacilityApplication;
+export const getCurrentUser           = layer.getCurrentUser;
+export const updateCurrentUser        = layer.updateCurrentUser;
+export const changePassword           = layer.changePassword;
+export const invitePatient            = layer.invitePatient;
+export const logoutProvider           = layer.logoutProvider;
 export const getPrescriptions         = layer.getPrescriptions;
 export const dispatchPrescription     = layer.dispatchPrescription;
 export const getPatients              = layer.getPatients;
+export const searchPatientsForBooking = layer.searchPatientsForBooking;
 export const getLabResults            = layer.getLabResults;
 export const getInventory             = layer.getInventory;
 export const getBilling               = layer.getBilling;
 export const getNotifications         = layer.getNotifications;
 export const getAvailability          = layer.getAvailability;
 export const getActivityLogs          = layer.getActivityLogs;
+export const getAnalytics             = layer.getAnalytics;
 
 // Billing
 export const markBillingPaid          = layer.markBillingPaid;

@@ -6,7 +6,7 @@ import { Sidebar } from '../organisms/Sidebar';
 import { TopBar } from '../organisms/TopBar';
 import { DashboardScreen } from './clinical/Dashboard';
 import { AppointmentsScreen, AppointmentDetailsScreen } from './clinical/Appointments';
-import { RecordsScreen } from './clinical/Records';
+import { RecordDetailsScreen, RecordsScreen } from './clinical/Records';
 import { VitalsScreen } from './clinical/Vitals';
 import { ChatScreen } from './clinical/Chat';
 import { OrdersScreen } from './operations/Orders';
@@ -14,8 +14,10 @@ import { TrackOrderScreen } from './operations/TrackOrder';
 import { NotificationsScreen } from './account/Notifications';
 import { ProfileScreen } from './account/Profile';
 import { SettingsScreen } from './account/Settings';
-import { getNotifications } from '../api';
+import { SupportScreen } from './account/Support';
 import { PageSeo } from '../seo/PageSeo';
+import { decoratePatientNavItems, getPatientModuleIntegrationReason } from '../config/patientModules';
+import { usePatientRealtime } from '../hooks/usePatientRealtime';
 
 const NAV_ITEMS = [
   { id: 'home', label: 'Dashboard', icon: { lib: 'feather', name: 'home' } },
@@ -28,6 +30,7 @@ const NAV_ITEMS = [
   { id: 'notifications', label: 'Notifications', icon: { lib: 'feather', name: 'bell' } },
   { id: 'profile', label: 'My Profile', icon: { lib: 'feather', name: 'user' } },
   { id: 'settings', label: 'Settings', icon: { lib: 'feather', name: 'settings' } },
+  { id: 'support', label: 'Support', icon: { lib: 'feather', name: 'help-circle' } },
 ];
 
 export function MainShell({ user, onLogout, onUpdateUser }) {
@@ -36,32 +39,26 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
   const [page, setPage] = useState('home');
   const [sidebarOpen, setSidebarOpen] = useState(sidebarDocked);
   const [selectedAppointmentId, setSelectedAppointmentId] = useState(null);
-  const [notificationsUnread, setNotificationsUnread] = useState(0);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [selectedRecordId, setSelectedRecordId] = useState(null);
+  const {
+    appointments,
+    notifications,
+    unreadCount: notificationsUnread,
+    loading: realtimeLoading,
+    settings,
+    markRead,
+    markAllRead,
+    upsertAppointment,
+  } = usePatientRealtime();
+  const navItems = useMemo(() => decoratePatientNavItems(NAV_ITEMS), []);
+
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     // Auto-dock or collapse sidebar when breakpoint changes
     setSidebarOpen(sidebarDocked);
   }, [sidebarDocked]);
-
-  useEffect(() => {
-    let mounted = true;
-    const loadNotifications = async () => {
-      try {
-        const items = await getNotifications();
-        if (mounted) {
-          const unread = (items || []).filter((n) => !n.read).length;
-          setNotificationsUnread(unread);
-        }
-      } catch (e) {
-        // ignore in mock
-      }
-    };
-    loadNotifications();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const pageMeta = useMemo(
     () => ({
@@ -72,19 +69,38 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
       records: { title: 'Medical Records', sub: 'Your health history', icon: NAV_ITEMS[4].icon },
       vitals: { title: 'My Vitals', sub: 'Health monitoring', icon: NAV_ITEMS[5].icon },
       chat: { title: 'Chat', sub: 'Dr. Amina Wanjiku', icon: NAV_ITEMS[6].icon },
-      notifications: { title: 'Notifications', sub: '2 unread alerts', icon: NAV_ITEMS[7].icon },
+      notifications: {
+        title: 'Notifications',
+        sub: notificationsUnread > 0 ? `${notificationsUnread} unread alerts` : 'All caught up',
+        icon: NAV_ITEMS[7].icon,
+      },
       profile: { title: 'My Profile', sub: 'Account & personal info', icon: NAV_ITEMS[8].icon },
       settings: { title: 'Settings', sub: 'App preferences', icon: NAV_ITEMS[9].icon },
+      support: { title: 'Support', sub: 'Contact care and technical support', icon: NAV_ITEMS[10].icon },
     }),
-    [],
+    [notificationsUnread],
   );
 
   const meta = pageMeta[page] || pageMeta.home;
+  const integrationReason = getPatientModuleIntegrationReason(page);
+  const resolvedMeta =
+    integrationReason && meta
+      ? { ...meta, sub: `Not integrated: ${integrationReason}` }
+      : meta;
   const seoKey = page === 'appointmentDetails' ? 'appointments' : page;
 
   const openAppointmentDetails = (id) => {
     setSelectedAppointmentId(id);
     setPage('appointmentDetails');
+  };
+
+  const openTrackOrder = (orderId = null) => {
+    setSelectedOrderId(orderId);
+    setPage('track');
+  };
+  const openRecordDetails = (recordId) => {
+    setSelectedRecordId(recordId);
+    setPage('recordDetails');
   };
 
   const handleUserMenuSelect = (key) => {
@@ -104,36 +120,58 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
           <DashboardScreen
             user={user}
             goTo={setPage}
+            appointments={appointments}
+            loadingAppointments={realtimeLoading}
             onOpenAppointment={openAppointmentDetails}
+            onOpenTrackOrder={openTrackOrder}
           />
         );
       case 'appointments':
-        return <AppointmentsScreen onOpenDetails={openAppointmentDetails} />;
+        return (
+          <AppointmentsScreen
+            appointments={appointments}
+            loading={realtimeLoading}
+            onOpenDetails={openAppointmentDetails}
+          />
+        );
       case 'orders':
         return (
           <OrdersScreen
-            onTrackOrder={() => setPage('track')}
+            onTrackOrder={openTrackOrder}
             onReorderOrder={() => setPage('orders')}
           />
         );
       case 'track':
-        return <TrackOrderScreen />;
+        return <TrackOrderScreen orderId={selectedOrderId} />;
       case 'records':
-        return <RecordsScreen />;
+        return <RecordsScreen onOpenRecord={openRecordDetails} />;
+      case 'recordDetails':
+        return <RecordDetailsScreen recordId={selectedRecordId} onBack={() => setPage('records')} />;
       case 'vitals':
         return <VitalsScreen />;
       case 'chat':
         return <ChatScreen />;
       case 'notifications':
-        return <NotificationsScreen />;
+        return (
+          <NotificationsScreen
+            notifications={notifications}
+            loading={realtimeLoading}
+            settings={settings}
+            onMarkRead={markRead}
+            onMarkAllRead={markAllRead}
+          />
+        );
       case 'profile':
         return <ProfileScreen user={user} onUpdateUser={onUpdateUser} />;
       case 'settings':
         return <SettingsScreen />;
+      case 'support':
+        return <SupportScreen />;
       case 'appointmentDetails':
         return (
           <AppointmentDetailsScreen
             appointmentId={selectedAppointmentId}
+            onAppointmentChanged={upsertAppointment}
             onBack={() => setPage('appointments')}
           />
         );
@@ -146,7 +184,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
     <View style={[styles.root, { backgroundColor: C.bg }]}>
       <PageSeo pageKey={seoKey} />
       <Sidebar
-        navItems={NAV_ITEMS}
+        navItems={navItems}
         activeId={page === 'appointmentDetails' ? 'appointments' : page}
         onChange={setPage}
         user={user}
@@ -156,6 +194,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
         open={sidebarDocked ? true : sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         overlay={!sidebarDocked}
+        notificationsUnread={notificationsUnread}
       />
       <View style={styles.main}>
         {userMenuOpen && (
@@ -165,12 +204,11 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
         )}
         <View style={styles.topBarLayer}>
         <TopBar
-          meta={meta}
+          meta={resolvedMeta}
           user={user}
           onToggleSidebar={() => setSidebarOpen((o) => !o)}
           onShowNotifications={() => {
             setPage('notifications');
-            setNotificationsUnread(0);
           }}
           sidebarOpen={sidebarOpen}
           sidebarDocked={sidebarDocked}

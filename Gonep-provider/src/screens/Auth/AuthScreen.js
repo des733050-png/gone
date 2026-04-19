@@ -4,7 +4,8 @@ import { useTheme } from '../../theme/ThemeContext';
 import { Btn } from '../../atoms/Btn';
 import { Input } from '../../atoms/Input';
 import { Icon } from '../../atoms/Icon';
-import { APP_CONFIG } from '../../config/env';
+import { APP_CONFIG, IS_MOCK } from '../../config/env';
+import { getCurrentUser, loginProvider } from '../../api';
 import { DEMO_ACCOUNTS } from '../../mock/data';
 import { ROLE_LABELS, ROLE_COLORS } from '../../config/roles';
 
@@ -29,16 +30,30 @@ export function AuthScreen({ onAuth, appName }) {
   const submit = async () => {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setLoading(true); setGlobalErr('');
-    await new Promise((r) => setTimeout(r, 800));
-    // In mock mode — match by email against all demo accounts
-    const match = DEMO_ACCOUNTS.find(a => a.user.email.toLowerCase() === form.email.toLowerCase());
-    if (match && form.password === APP_CONFIG.DEMO_PASSWORD) {
-      onAuth(match.user);
-    } else {
-      setGlobalErr('Invalid credentials. Use a demo account below.');
+    setLoading(true);
+    setGlobalErr('');
+    try {
+      if (IS_MOCK) {
+        await new Promise((r) => setTimeout(r, 400));
+        const match = DEMO_ACCOUNTS.find(a => a.user.email.toLowerCase() === form.email.toLowerCase());
+        if (match && form.password === APP_CONFIG.DEMO_PASSWORD) {
+          onAuth(match.user);
+          return;
+        }
+        setGlobalErr('Invalid credentials. Use a demo account below.');
+      } else {
+        const user = await loginProvider({
+          email: form.email.trim(),
+          password: form.password,
+        });
+        const hydratedUser = await getCurrentUser().catch(() => null);
+        onAuth(hydratedUser || user);
+      }
+    } catch (error) {
+      setGlobalErr(error?.message || 'Unable to complete authentication request.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const fillDemo = (account) => {
@@ -97,50 +112,53 @@ export function AuthScreen({ onAuth, appName }) {
             <View style={[styles.footer, { borderTopColor: C.border }]}>
               <Btn label={loading ? 'Signing in…' : 'Sign In'} onPress={submit} full size="lg" loading={loading} />
 
-              <View style={styles.orRow}>
-                <View style={[styles.orLine, { backgroundColor: C.divider }]} />
-                <Text style={{ color: C.textMuted, fontSize: 12, marginHorizontal: 8 }}>demo accounts</Text>
-                <View style={[styles.orLine, { backgroundColor: C.divider }]} />
-              </View>
+              {IS_MOCK && (
+                <>
+                  <View style={styles.orRow}>
+                    <View style={[styles.orLine, { backgroundColor: C.divider }]} />
+                    <Text style={{ color: C.textMuted, fontSize: 12, marginHorizontal: 8 }}>demo accounts</Text>
+                    <View style={[styles.orLine, { backgroundColor: C.divider }]} />
+                  </View>
 
-              {/* Demo role picker */}
-              <TouchableOpacity
-                onPress={() => setShowDemo(v => !v)}
-                style={[styles.demoBtn, { borderColor: C.primary, backgroundColor: C.bg }]}
-              >
-                <Icon name="account-multiple" lib="mc" size={14} color={C.primary} style={{ marginRight: 6 }} />
-                <Text style={{ color: C.primary, fontWeight: '600', fontSize: 13 }}>
-                  {showDemo ? 'Hide demo accounts' : 'Choose a demo role'}
-                </Text>
-                <Icon name={showDemo ? 'chevron-up' : 'chevron-down'} lib="feather" size={14} color={C.primary} style={{ marginLeft: 4 }} />
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setShowDemo(v => !v)}
+                    style={[styles.demoBtn, { borderColor: C.primary, backgroundColor: C.bg }]}
+                  >
+                    <Icon name="account-multiple" lib="mc" size={14} color={C.primary} style={{ marginRight: 6 }} />
+                    <Text style={{ color: C.primary, fontWeight: '600', fontSize: 13 }}>
+                      {showDemo ? 'Hide demo accounts' : 'Choose a demo role'}
+                    </Text>
+                    <Icon name={showDemo ? 'chevron-up' : 'chevron-down'} lib="feather" size={14} color={C.primary} style={{ marginLeft: 4 }} />
+                  </TouchableOpacity>
 
-              {showDemo && (
-                <View style={[styles.demoList, { borderColor: C.border, backgroundColor: C.surface }]}>
-                  {DEMO_ACCOUNTS.map((account) => {
-                    const color = roleColorMap[ROLE_COLORS[account.role]] || C.primary;
-                    return (
-                      <TouchableOpacity
-                        key={account.role}
-                        onPress={() => fillDemo(account)}
-                        style={[styles.demoRow, { borderBottomColor: C.divider }]}
-                      >
-                        <View style={[styles.roleChip, { backgroundColor: `${color}18` }]}>
-                          <Text style={{ color, fontSize: 11, fontWeight: '700' }}>
-                            {account.label}
-                          </Text>
-                        </View>
-                        <Text style={{ color: C.textMuted, fontSize: 11, flex: 1 }} numberOfLines={1}>
-                          {account.user.email}
-                        </Text>
-                        <Icon name="chevron-right" lib="feather" size={13} color={C.textMuted} />
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <Text style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', padding: 8 }}>
-                    Password for all: {APP_CONFIG.DEMO_PASSWORD}
-                  </Text>
-                </View>
+                  {showDemo && (
+                    <View style={[styles.demoList, { borderColor: C.border, backgroundColor: C.surface }]}>
+                      {DEMO_ACCOUNTS.map((account) => {
+                        const color = roleColorMap[ROLE_COLORS[account.role]] || C.primary;
+                        return (
+                          <TouchableOpacity
+                            key={account.role}
+                            onPress={() => fillDemo(account)}
+                            style={[styles.demoRow, { borderBottomColor: C.divider }]}
+                          >
+                            <View style={[styles.roleChip, { backgroundColor: `${color}18` }]}>
+                              <Text style={{ color, fontSize: 11, fontWeight: '700' }}>
+                                {account.label}
+                              </Text>
+                            </View>
+                            <Text style={{ color: C.textMuted, fontSize: 11, flex: 1 }} numberOfLines={1}>
+                              {account.user.email}
+                            </Text>
+                            <Icon name="chevron-right" lib="feather" size={13} color={C.textMuted} />
+                          </TouchableOpacity>
+                        );
+                      })}
+                      <Text style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', padding: 8 }}>
+                        Password for all: {APP_CONFIG.DEMO_PASSWORD}
+                      </Text>
+                    </View>
+                  )}
+                </>
               )}
             </View>
           </View>

@@ -4,6 +4,7 @@ import {
   MOCK_LAB, MOCK_INVENTORY, MOCK_BILLING, MOCK_NOTIFICATIONS,
   MOCK_AVAILABILITY, MOCK_ACTIVITY_LOGS, MOCK_CONSULTATIONS,
 } from './data';
+import { parseExistingDateTime } from '../utils/bookingAvailability';
 
 const delay = (ms = MOCK_DELAY_MS) => new Promise(r => setTimeout(r, ms));
 
@@ -27,19 +28,111 @@ const nowTs = () => {
 };
 
 export function appendLog(entry) {
-  _logs.unshift({ id: `log-${Date.now()}`, ts: nowTs(), ...entry });
+  _logs.unshift({
+    id: `log-${Date.now()}`,
+    ts: nowTs(),
+    occurred_at: new Date().toISOString(),
+    ...entry,
+  });
 }
 
+export const submitFacilityApplication = async (payload = {}) => {
+  await delay(500);
+  const isFormData =
+    typeof FormData !== 'undefined' && payload instanceof FormData;
+  const getValue = (key) => {
+    if (!isFormData) return payload?.[key] || '';
+    const value = payload.get(key);
+    return typeof value === 'string' ? value : '';
+  };
+  return {
+    application_id: `fac-app-${Date.now()}`,
+    facility_code: `FAC-${Math.floor(Math.random() * 9000 + 1000)}`,
+    status: 'under_review',
+    detail: 'Application submitted successfully. Await super admin approval.',
+    hospital: {
+      name: getValue('name'),
+      email: getValue('email'),
+      registration_no: getValue('registration_no'),
+    },
+    admin_contact: {
+      name: getValue('admin_name'),
+      email: getValue('admin_email'),
+    },
+    submitted_documents: {},
+  };
+};
+
 // ─── Fetch functions ──────────────────────────────────────────────────────────
-export const fetchAppointments   = async () => { await delay(); return _appointments.map(x => ({ ...x })); };
+function withScheduledFor(row) {
+  if (row.scheduled_for) return { ...row };
+  const dt = parseExistingDateTime(row);
+  return dt ? { ...row, scheduled_for: dt.toISOString() } : { ...row };
+}
+
+export const fetchAppointments = async () => {
+  await delay();
+  return _appointments.map((x) => withScheduledFor({ ...x }));
+};
 export const fetchPrescriptions  = async () => { await delay(); return _prescriptions.map(x => ({ ...x })); };
 export const fetchPatients       = async () => { await delay(); return _patients.map(x => ({ ...x })); };
+
+/** Mirrors GET provider/patients/search/?q= — minimal { id, name, phone } rows */
+export const searchPatientsForBooking = async (q = '') => {
+  await delay(200);
+  const ql = String(q || '').trim().toLowerCase();
+  if (ql.length < 2) return { results: [] };
+  const results = _patients
+    .filter((p) => {
+      const name = String(p?.name || '').toLowerCase();
+      const id = String(p?.id || '').toLowerCase();
+      const phone = String(p?.phone || '').toLowerCase();
+      return name.includes(ql) || id.includes(ql) || phone.includes(ql);
+    })
+    .slice(0, 25)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      phone: p.phone || '',
+    }));
+  return { results };
+};
 export const fetchLabResults     = async () => { await delay(); return _lab.map(x => ({ ...x })); };
 export const fetchInventory      = async () => { await delay(); return _inventory.map(x => ({ ...x, history: [...x.history] })); };
 export const fetchBilling        = async () => { await delay(); return _billing.map(x => ({ ...x })); };
 export const fetchNotifications  = async () => { await delay(); return _notifications.map(x => ({ ...x })); };
 export const fetchAvailability   = async () => { await delay(); return JSON.parse(JSON.stringify(_availability)); };
 export const fetchActivityLogs   = async () => { await delay(); return _logs.map(x => ({ ...x })); };
+
+export const createAppointment = async (payload = {}) => {
+  await delay(500);
+  const when = payload?.scheduled_for ? new Date(payload.scheduled_for) : new Date();
+  const time = when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const today = new Date();
+  const isToday = when.toDateString() === today.toDateString();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const isTomorrow = when.toDateString() === tomorrow.toDateString();
+  const date = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : when.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+
+  const created = {
+    id: `apt-${Date.now()}`,
+    patient: payload?.patient_name || 'Patient',
+    patient_id: payload?.patient_id || null,
+    doctor_id: payload?.doctor_id || null,
+    age: payload?.patient_age || null,
+    type: payload?.appointment_type || 'In Facility',
+    time,
+    date,
+    status: 'confirmed',
+    reason: payload?.visit_reason || '',
+    phone: payload?.patient_phone || '',
+    scheduled_for: when.toISOString(),
+    duration_minutes: Number(payload?.duration_minutes) || 30,
+  };
+  _appointments = [created, ..._appointments];
+  return { ...created };
+};
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
 export const dispatchPrescription = async (id) => {
@@ -184,7 +277,13 @@ export const addStaffMember = async (newMember) => {
   const staff = getStaff();
   const member = { ...newMember, id: `usr-${Date.now()}`, suspended: false };
   staff.push(member);
-  return { ...member };
+  return {
+    ...member,
+    invitation: {
+      temporary_password: `Stf${String(Date.now()).slice(-5)}Aa1`,
+      login_url: 'http://127.0.0.1:8081',
+    },
+  };
 };
 
 export const suspendStaff = async (id) => {
@@ -256,7 +355,13 @@ let _clinicalSettings = null;
 function getClinicalSettings() {
   if (!_clinicalSettings) {
     const { MOCK_CLINICAL_SETTINGS } = require('./data');
-    _clinicalSettings = { ...MOCK_CLINICAL_SETTINGS };
+    _clinicalSettings = {
+      push_notifications: true,
+      critical_lab_alerts: true,
+      email_reports: true,
+      two_factor_enabled: false,
+      ...MOCK_CLINICAL_SETTINGS,
+    };
   }
   return _clinicalSettings;
 }
@@ -270,6 +375,37 @@ export const updateClinicalSettings = async (patch) => {
   await delay(200);
   _clinicalSettings = { ...getClinicalSettings(), ...patch };
   return { ..._clinicalSettings };
+};
+
+export const changePassword = async ({ currentPassword, newPassword } = {}) => {
+  await delay(1000);
+  if (String(currentPassword || '') === 'wrong') {
+    const err = new Error('Current password is incorrect');
+    err.status = 400;
+    err.body = { error: 'Current password is incorrect' };
+    throw err;
+  }
+  if (String(newPassword || '') === String(currentPassword || '')) {
+    throw new Error('New password must be different from your current password.');
+  }
+  if (!String(newPassword || '') || String(newPassword).length < 8) {
+    throw new Error('Password must be at least 8 characters and include one number and one uppercase letter.');
+  }
+  return { detail: 'Password updated. Please sign in again.' };
+};
+
+export const invitePatient = async (payload = {}) => {
+  await delay(500);
+  const email = String(payload?.email || '').trim().toLowerCase();
+  if (!email) throw new Error('Email is required.');
+  if (!String(payload?.date_of_birth || '').trim()) throw new Error('Date of birth is required.');
+  return {
+    patient_invite: true,
+    patient_code: `PAT-${Date.now()}`,
+    email,
+    temporary_password: `Inv${String(Date.now()).slice(-6)}Aa1`,
+    login_url: 'https://patient.gonep.local/login',
+  };
 };
 
 // ─── Support ticket mutations ─────────────────────────────────────────────────

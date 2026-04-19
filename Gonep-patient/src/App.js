@@ -1,4 +1,6 @@
-import React, { useState, useMemo } from 'react';
+// FILE: src/App.js
+
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, StatusBar, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -6,6 +8,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './theme/ThemeContext';
 import { APP_CONFIG } from './config/env';
 import { SeoProvider } from './seo/SeoProvider';
+import { getCurrentUser, logoutPatient } from './api';
 
 // Screens
 import { AuthScreen } from './screens/authentication';
@@ -16,6 +19,24 @@ const Stack = createNativeStackNavigator();
 function RootNavigator() {
   const { isDark } = useTheme();
   const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    const restoreSession = async () => {
+      try {
+        const sessionUser = await getCurrentUser();
+        if (active && sessionUser) {
+          setUser(sessionUser);
+        }
+      } catch {
+        // Keep auth screen as fallback when no active session exists.
+      }
+    };
+    restoreSession();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const navTheme = useMemo(
     () => ({
@@ -46,7 +67,10 @@ function RootNavigator() {
               <MainShell
                 {...props}
                 user={user}
-                onLogout={() => setUser(null)}
+                onLogout={async () => {
+                  try { await logoutPatient(); } catch { /* ignore */ }
+                  setUser(null);
+                }}
                 onUpdateUser={setUser}
               />
             )}
@@ -79,5 +103,3 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-
-

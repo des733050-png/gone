@@ -3,9 +3,8 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   getPatientConsultations, addConsultation,
   updateConsultation, cancelPrescription, appendLog,
-  getClinicalSettings,
+  getClinicalSettings, getLabResults, getAppointments, getPrescriptions,
 } from '../api';
-import { MOCK_LAB, MOCK_APPOINTMENTS } from '../mock/data';
 import { roleCapabilities } from '../constants/emr';
 
 export function usePatientDetail(patient, user) {
@@ -13,12 +12,13 @@ export function usePatientDetail(patient, user) {
   const [prescriptions,  setPrescriptions]  = useState([]);
   const [editWindowHrs,  setEditWindowHrs]  = useState(24);
   const [loading,        setLoading]        = useState(true);
+  const [error,          setError]          = useState('');
   const [activeTab,      setActiveTab]      = useState('overview');
   const [consultModal,   setConsultModal]   = useState({ visible: false, existing: null });
+  const [patientLabs,    setPatientLabs]    = useState([]);
+  const [patientAppts,   setPatientAppts]   = useState([]);
 
   const caps         = roleCapabilities(user?.role);
-  const patientLabs  = MOCK_LAB.filter(l => l.patient === patient?.name);
-  const patientAppts = MOCK_APPOINTMENTS.filter(a => a.patient === patient?.name);
 
   // Load admin-configured edit window
   useEffect(() => {
@@ -30,18 +30,27 @@ export function usePatientDetail(patient, user) {
   const loadConsultations = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await getPatientConsultations(patient?.id);
-      setConsultations(data || []);
+      setError('');
+      const [consults, labs, appts, rxs] = await Promise.all([
+        getPatientConsultations(patient?.id),
+        getLabResults().catch(() => []),
+        getAppointments().catch(() => []),
+        getPrescriptions().catch(() => []),
+      ]);
+      setConsultations(consults || []);
+      setPatientLabs((labs || []).filter((l) => l.patient_id === patient?.id || l.patient === patient?.name));
+      setPatientAppts((appts || []).filter((a) => a.patient_id === patient?.id || a.patient === patient?.name));
+      setPrescriptions((rxs || []).filter((r) => r.patient_id === patient?.id || r.patient === patient?.name));
+    } catch (err) {
+      setError(err?.message || 'Unable to load patient detail.');
     } finally {
       setLoading(false);
     }
-  }, [patient?.id]);
+  }, [patient?.id, patient?.name]);
 
   useEffect(() => {
     loadConsultations();
-    const { MOCK_PRESCRIPTIONS: rxs } = require('../mock/data');
-    setPrescriptions(rxs.filter(r => r.patient === patient?.name));
-  }, [loadConsultations, patient]);
+  }, [loadConsultations]);
 
   const handleCancelRx = useCallback(async (rxId) => {
     await cancelPrescription(rxId);
@@ -101,6 +110,7 @@ export function usePatientDetail(patient, user) {
     consultations, prescriptions, editWindowHrs,
     loading, activeTab, setActiveTab,
     consultModal, setConsultModal,
+    error,
     // derived
     caps, patientLabs, patientAppts, timeline, TABS,
     // actions

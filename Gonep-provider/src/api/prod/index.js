@@ -5,103 +5,60 @@
 // not in dev/index.js — to keep the dev surface simple.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { API_CONFIG, ENDPOINTS } from '../../config/env';
+import { createHttpLayer } from '../httpLayer';
 
-const { TIMEOUT_MS } = API_CONFIG;
+const layer = createHttpLayer({ tokenMode: false });
 
-// In production, attach the bearer token stored in SecureStore / AsyncStorage.
-// Replace getToken() with your actual auth retrieval.
-async function getToken() {
-  // TODO: return await SecureStore.getItemAsync('access_token');
-  return null;
-}
-
-async function http(url, options = {}) {
-  const token = await getToken();
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      ...options,
-      signal: ctrl.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options.headers || {}),
-      },
-    });
-    // 401 → token refresh logic would go here
-    if (!res.ok) throw new Error(`[prod] HTTP ${res.status} — ${url}`);
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
-  } catch (err) {
-    if (err?.name === 'AbortError')
-      throw new Error(`[prod] Timeout after ${TIMEOUT_MS}ms — ${url}`);
-    // TODO: send to error monitoring (e.g. Sentry)
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-const post  = (url, body = {}) => http(url, { method: 'POST',  body: JSON.stringify(body) });
-const patch = (url, body = {}) => http(url, { method: 'PATCH', body: JSON.stringify(body) });
-const del   = (url, body = {}) => http(url, { method: 'DELETE',body: JSON.stringify(body) });
-
-export const getAppointments         = ()        => http(ENDPOINTS.appointments);
-export const getPrescriptions        = ()        => http(ENDPOINTS.prescriptions);
-export const dispatchPrescription    = (id)      => post(ENDPOINTS.prescriptionDispatch(id));
-export const getPatients             = ()        => http(ENDPOINTS.patients);
-export const getLabResults           = ()        => http(ENDPOINTS.labResults);
-export const getInventory            = ()        => http(ENDPOINTS.inventory);
-export const getBilling              = ()        => http(ENDPOINTS.billing);
-export const getNotifications        = ()        => http(ENDPOINTS.notifications);
-export const getAvailability         = ()        => http(ENDPOINTS.availability);
-export const getActivityLogs         = ()        => http(ENDPOINTS.activityLogs);
-
-export const markBillingPaid         = (id)      => post(`${ENDPOINTS.billing}${id}/pay/`);
-export const markNotificationRead    = (id)      => patch(`${ENDPOINTS.notifications}${id}/read/`);
-export const markAllNotificationsRead= ()        => post(`${ENDPOINTS.notifications}read-all/`);
-
-export const addStock                = (p)       => post(`${ENDPOINTS.inventory}${p.id}/add-stock/`,    p);
-export const reduceStock             = (p)       => post(`${ENDPOINTS.inventory}${p.id}/reduce-stock/`, p);
-export const updateInventoryItem     = (id, p)   => patch(`${ENDPOINTS.inventory}${id}/`,               p);
-export const addInventoryItem        = (p)       => post(ENDPOINTS.inventory,                            p);
-export const deactivateInventoryItem = (id)      => post(`${ENDPOINTS.inventory}${id}/deactivate/`);
-export const toggleEcommerce         = (id)      => post(`${ENDPOINTS.inventory}${id}/toggle-ecommerce/`);
-
-export const addAvailabilitySlot     = (p)       => post(ENDPOINTS.availability,    p);
-export const removeAvailabilitySlot  = (p)       => del(ENDPOINTS.availability,     p);
-export const toggleBlockDay          = (p)       => patch(ENDPOINTS.availability,   p);
-
-export const updateStaff             = (id, p)   => patch(`${ENDPOINTS.staff}${id}/`, p);
-export const addStaffMember          = (p)       => post(ENDPOINTS.staff,              p);
-export const suspendStaff            = (id)      => post(`${ENDPOINTS.staff}${id}/suspend/`);
-export const reactivateStaff         = (id)      => post(`${ENDPOINTS.staff}${id}/reactivate/`);
-
-// Logging is entirely server-side in production
-export const appendLog = () => {};
-
-// Staff (added)
-export const getStaff = () => http(ENDPOINTS.staff);
-
-// Consultations (added)
-export const getConsultations        = ()        => http(ENDPOINTS.consultations || '');
-export const getPatientConsultations = (pid)     => http(`${ENDPOINTS.consultations || ''}?patient_id=${pid}`);
-export const addConsultation         = (p)       => post(ENDPOINTS.consultations || '', p);
-export const updateConsultation      = (id, p)   => patch(`${ENDPOINTS.consultations || ''}${id}/`, p);
-export const cancelPrescription      = (id)      => post(`${ENDPOINTS.prescriptions}${id}/cancel/`);
-
-// Clinical settings
-export const getClinicalSettings  = ()      => http(ENDPOINTS.clinicalSettings  || '');
-export const setClinicalSettings  = (p)     => patch(ENDPOINTS.clinicalSettings || '', p);
-// Support tickets
-export const getSupportTickets    = ()      => http(ENDPOINTS.supportTickets    || '');
-export const createSupportTicket  = (p)     => post(ENDPOINTS.supportTickets    || '', p);
-export const updateSupportTicket  = (id, p) => patch(`${ENDPOINTS.supportTickets || ''}${id}/`, p);
-// POS
-export const getPosAccounts       = ()      => http(ENDPOINTS.posAccounts       || '');
-export const getPosTransactions   = (id)    => http(`${ENDPOINTS.posTransactions|| ''}${id ? '?pos_id='+id : ''}`);
-export const createPosAccount     = (p)     => post(ENDPOINTS.posAccounts       || '', p);
-export const savePosTransaction   = (p)     => post(ENDPOINTS.posTransactions   || '', p);
-export const resetPosPassword     = (id, p) => post(`${ENDPOINTS.posAccounts    || ''}${id}/reset-password/`, p);
+export const loginProvider = layer.loginProvider;
+export const submitFacilityApplication = layer.submitFacilityApplication;
+export const getCurrentUser = layer.getCurrentUser;
+export const updateCurrentUser = layer.updateCurrentUser;
+export const changePassword = layer.changePassword;
+export const invitePatient = layer.invitePatient;
+export const logoutProvider = layer.logoutProvider;
+export const getAppointments = layer.getAppointments;
+export const createAppointment = layer.createAppointment;
+export const getPrescriptions = layer.getPrescriptions;
+export const dispatchPrescription = layer.dispatchPrescription;
+export const getPatients = layer.getPatients;
+export const searchPatientsForBooking = layer.searchPatientsForBooking;
+export const getLabResults = layer.getLabResults;
+export const getInventory = layer.getInventory;
+export const getBilling = layer.getBilling;
+export const getNotifications = layer.getNotifications;
+export const getAvailability = layer.getAvailability;
+export const getActivityLogs = layer.getActivityLogs;
+export const getAnalytics = layer.getAnalytics;
+export const markBillingPaid = layer.markBillingPaid;
+export const markNotificationRead = layer.markNotificationRead;
+export const markAllNotificationsRead = layer.markAllNotificationsRead;
+export const addStock = layer.addStock;
+export const reduceStock = layer.reduceStock;
+export const updateInventoryItem = layer.updateInventoryItem;
+export const addInventoryItem = layer.addInventoryItem;
+export const deactivateInventoryItem = layer.deactivateInventoryItem;
+export const toggleEcommerce = layer.toggleEcommerce;
+export const addAvailabilitySlot = layer.addAvailabilitySlot;
+export const removeAvailabilitySlot = layer.removeAvailabilitySlot;
+export const toggleBlockDay = layer.toggleBlockDay;
+export const updateStaff = layer.updateStaff;
+export const addStaffMember = layer.addStaffMember;
+export const suspendStaff = layer.suspendStaff;
+export const reactivateStaff = layer.reactivateStaff;
+export const appendLog = layer.appendLog;
+export const getStaff = layer.getStaff;
+export const getConsultations = layer.getConsultations;
+export const getPatientConsultations = layer.getPatientConsultations;
+export const addConsultation = layer.addConsultation;
+export const updateConsultation = layer.updateConsultation;
+export const cancelPrescription = layer.cancelPrescription;
+export const getClinicalSettings = layer.getClinicalSettings;
+export const setClinicalSettings = layer.setClinicalSettings;
+export const getSupportTickets = layer.getSupportTickets;
+export const createSupportTicket = layer.createSupportTicket;
+export const updateSupportTicket = layer.updateSupportTicket;
+export const getPosAccounts = layer.getPosAccounts;
+export const getPosTransactions = layer.getPosTransactions;
+export const createPosAccount = layer.createPosAccount;
+export const savePosTransaction = layer.savePosTransaction;
+export const resetPosPassword = layer.resetPosPassword;

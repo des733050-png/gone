@@ -1,3 +1,5 @@
+// FILE: src/api/mock/index.js
+
 import { APP_CONFIG } from '../../config/env';
 import {
   MOCK_USER,
@@ -10,6 +12,15 @@ import {
 } from '../../mock/data';
 
 const delay = (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms));
+let MOCK_SETTINGS = {
+  appointment_reminders: true,
+  order_updates: true,
+  lab_results_alerts: true,
+  medication_refill_reminders: true,
+  marketing_updates: false,
+  privacy_mode: false,
+};
+let MOCK_SUPPORT_TICKETS = [];
 
 export async function loginPatient({ email, password }) {
   await delay();
@@ -34,6 +45,32 @@ export async function registerPatient(payload) {
 export async function getCurrentUser() {
   await delay();
   return MOCK_USER;
+}
+
+export async function updateCurrentUser(payload) {
+  await delay();
+  return {
+    ...MOCK_USER,
+    ...(payload || {}),
+  };
+}
+
+export async function getSettings() {
+  await delay();
+  return { ...MOCK_SETTINGS };
+}
+
+export async function updateSettings(payload) {
+  await delay();
+  MOCK_SETTINGS = {
+    appointment_reminders: Boolean(payload?.appointment_reminders),
+    order_updates: Boolean(payload?.order_updates),
+    lab_results_alerts: Boolean(payload?.lab_results_alerts),
+    medication_refill_reminders: Boolean(payload?.medication_refill_reminders),
+    marketing_updates: Boolean(payload?.marketing_updates),
+    privacy_mode: Boolean(payload?.privacy_mode),
+  };
+  return { ...MOCK_SETTINGS };
 }
 
 export async function getAppointments(filters = {}) {
@@ -70,7 +107,6 @@ export async function reorderOrder(id) {
   await delay();
   const original = MOCK_ORDERS.find((item) => item.id === id);
   if (!original) return null;
-
   const copy = {
     ...original,
     id: `${id}-R${Math.floor(Math.random() * 90 + 10)}`,
@@ -85,6 +121,24 @@ export async function reorderOrder(id) {
 export async function getRecords() {
   await delay();
   return [...MOCK_RECORDS];
+}
+
+export async function getRecordById(id) {
+  await delay();
+  const record = MOCK_RECORDS.find((item) => item.id === id) || null;
+  if (!record) return null;
+  return {
+    ...record,
+    detail: {
+      summary: record.title,
+      fields: {
+        drug_name: 'Amlodipine 5mg',
+        dosage: 'Once daily',
+        instructions: 'Take after breakfast.',
+        prescribed_date: new Date().toISOString(),
+      },
+    },
+  };
 }
 
 export async function getVitals() {
@@ -108,4 +162,44 @@ export async function markNotificationRead(id) {
   if (idx === -1) return null;
   MOCK_NOTIFICATIONS[idx] = { ...MOCK_NOTIFICATIONS[idx], read: true };
   return MOCK_NOTIFICATIONS[idx];
+}
+
+export async function markAllNotificationsRead() {
+  await delay();
+  for (let i = 0; i < MOCK_NOTIFICATIONS.length; i += 1) {
+    MOCK_NOTIFICATIONS[i] = { ...MOCK_NOTIFICATIONS[i], read: true };
+  }
+  return { detail: 'Notifications updated.' };
+}
+
+export async function getSupportTickets() {
+  await delay();
+  return [...MOCK_SUPPORT_TICKETS];
+}
+
+export async function createSupportTicket(payload = {}) {
+  await delay();
+  const ticket = {
+    id: `ptkt-${Date.now()}`,
+    reference: `PTKT-${String(MOCK_SUPPORT_TICKETS.length + 1).padStart(4, '0')}`,
+    subject: payload.subject || '',
+    message: payload.message || '',
+    severity: payload.severity || 'medium',
+    status: 'in_progress',
+    channel: 'app',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  MOCK_SUPPORT_TICKETS = [ticket, ...MOCK_SUPPORT_TICKETS];
+  return ticket;
+}
+
+export function subscribePatientEvents() {
+  return () => {};
+}
+
+export async function logoutPatient() {
+  await delay();
+  // Mock logout — no server state to clear
+  return { authenticated: false };
 }

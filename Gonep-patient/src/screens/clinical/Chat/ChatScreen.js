@@ -6,14 +6,30 @@ import { Avatar } from '../../../atoms/Avatar';
 import { Btn } from '../../../atoms/Btn';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
 import { useChatThread } from '../../../hooks/useChatThread';
+import {
+  getPatientModuleIntegrationReason,
+  isPatientModuleIntegrated,
+} from '../../../config/patientModules';
 
 export function ChatScreen() {
   const { C } = useTheme();
-  const { messages } = useChatThread();
+  const integrated = isPatientModuleIntegrated('chat');
+  const integrationReason = getPatientModuleIntegrationReason('chat');
+  const { messages } = useChatThread(integrated);
 
   return (
     <ScreenContainer scroll={false}>
       <Card style={styles.card}>
+        {!integrated ? (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ color: C.text, fontWeight: '700', marginBottom: 4 }}>
+              Not integrated yet
+            </Text>
+            <Text style={{ color: C.textMuted, fontSize: 12 }}>
+              {integrationReason || 'Chat backend endpoint is not available in this environment.'}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.header}>
           <Avatar name="Dr. Amina Wanjiku" size={32} />
           <View style={{ marginLeft: 8 }}>
@@ -68,6 +84,11 @@ export function ChatScreen() {
               </View>
             );
           })}
+          {integrated && messages.length === 0 ? (
+            <Text style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', marginTop: 12 }}>
+              No messages yet.
+            </Text>
+          ) : null}
         </ScrollView>
         <View style={styles.footer}>
           <Btn label="Send quick update" variant="secondary" size="sm" full />

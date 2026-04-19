@@ -87,6 +87,8 @@ export const MOCK_APPOINTMENTS = [
   { id: 'apt-003', patient: 'Mary Achieng',   doctor_id: 'usr-DOC-002', age: 29, type: 'In Facility',  time: '9:00 AM',  date: 'Tomorrow',   status: 'pending',    reason: 'General checkup',   phone: '+254 734 567 890' },
   { id: 'apt-004', patient: 'Peter Otieno',   doctor_id: 'usr-DOC-001', age: 41, type: 'Home Visit',   time: '11:00 AM', date: 'Thu, Mar 6', status: 'confirmed',  reason: 'Post-op follow-up', phone: '+254 745 678 901' },
   { id: 'apt-005', patient: 'Sarah Kamande',  doctor_id: null,           age: 27, type: 'In Facility',  time: '10:00 AM', date: 'Today',      status: 'unassigned', reason: 'First visit',       phone: '+254 756 789 012' },
+  { id: 'apt-006', patient: 'Cancelled User', doctor_id: 'usr-DOC-001', age: 45, type: 'In Facility',  time: '8:00 AM',  date: 'Today',      status: 'cancelled',  reason: 'Patient cancelled', phone: '+254 700 000 001' },
+  { id: 'apt-007', patient: 'Done Visit',     doctor_id: 'usr-DOC-002', age: 38, type: 'In Facility',  time: '7:30 AM',  date: 'Yesterday',  status: 'completed',  reason: 'Annual physical',   phone: '+254 700 000 002' },
 ];
 
 // ─── Prescriptions ────────────────────────────────────────────────────────────
@@ -98,10 +100,10 @@ export const MOCK_PRESCRIPTIONS = [
 
 // ─── Patients / EMR ───────────────────────────────────────────────────────────
 export const MOCK_PATIENTS = [
-  { id: 'pat-001', name: 'Faith Njoroge', doctor_id: 'usr-DOC-001', age: 34, blood_group: 'O+',  gender: 'F', last_visit: 'Today',     conditions: ['Hypertension', 'Type 2 Diabetes'], allergies: ['Penicillin'], medications: ['Amlodipine 5mg'] },
-  { id: 'pat-002', name: 'James Kamau',   doctor_id: 'usr-DOC-001', age: 52, blood_group: 'A+',  gender: 'M', last_visit: 'Yesterday', conditions: ['Diabetes', 'Obesity'],              allergies: [],            medications: ['Metformin 850mg'] },
-  { id: 'pat-003', name: 'Mary Achieng',  doctor_id: 'usr-DOC-002', age: 29, blood_group: 'B+',  gender: 'F', last_visit: 'Mar 1',     conditions: ['Asthma'],                          allergies: ['Pollen'],    medications: [] },
-  { id: 'pat-004', name: 'Peter Otieno',  doctor_id: 'usr-DOC-001', age: 41, blood_group: 'AB-', gender: 'M', last_visit: 'Feb 28',    conditions: ['Post-op recovery'],                allergies: [],            medications: [] },
+  { id: 'pat-001', name: 'Faith Njoroge', phone: '+254712000001', doctor_id: 'usr-DOC-001', age: 34, blood_group: 'O+',  gender: 'F', last_visit: 'Today',     conditions: ['Hypertension', 'Type 2 Diabetes'], allergies: ['Penicillin'], medications: ['Amlodipine 5mg'] },
+  { id: 'pat-002', name: 'James Kamau',   phone: '+254712000002', doctor_id: 'usr-DOC-001', age: 52, blood_group: 'A+',  gender: 'M', last_visit: 'Yesterday', conditions: ['Diabetes', 'Obesity'],              allergies: [],            medications: ['Metformin 850mg'] },
+  { id: 'pat-003', name: 'Mary Achieng',  phone: '+254712000003', doctor_id: 'usr-DOC-002', age: 29, blood_group: 'B+',  gender: 'F', last_visit: 'Mar 1',     conditions: ['Asthma'],                          allergies: ['Pollen'],    medications: [] },
+  { id: 'pat-004', name: 'Peter Otieno',  phone: '+254712000004', doctor_id: 'usr-DOC-001', age: 41, blood_group: 'AB-', gender: 'M', last_visit: 'Feb 28',    conditions: ['Post-op recovery'],                allergies: [],            medications: [] },
 ];
 
 // ─── Lab Results ──────────────────────────────────────────────────────────────
@@ -316,6 +318,10 @@ export const MOCK_CONSULTATIONS = [
 export const MOCK_CLINICAL_SETTINGS = {
   edit_window_hours: 24, // default 24 hrs
   allowed_values: [1, 6, 12, 24, 48, 72], // hours the admin may choose from
+  push_notifications: true,
+  critical_lab_alerts: true,
+  email_reports: true,
+  two_factor_enabled: false,
 };
 
 // ─── Support tickets ──────────────────────────────────────────────────────────

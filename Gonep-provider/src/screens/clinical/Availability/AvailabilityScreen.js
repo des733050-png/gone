@@ -26,6 +26,13 @@ export function AvailabilityScreen({ user }) {
       </ScreenContainer>
     );
   }
+  if (av.error) {
+    return (
+      <ScreenContainer>
+        <Text style={{ color: C.danger, textAlign: 'center', marginTop: 40 }}>{av.error}</Text>
+      </ScreenContainer>
+    );
+  }
 
   // Admin / receptionist — doctor picker first
   if (!av.isDoctor && !av.activeDocId) {
@@ -57,6 +64,9 @@ export function AvailabilityScreen({ user }) {
             </Card>
           );
         })}
+        {!av.doctors.length && (
+          <Text style={{ color: C.textMuted, marginTop: 8 }}>No doctor schedules available yet.</Text>
+        )}
       </ScreenContainer>
     );
   }

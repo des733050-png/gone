@@ -12,14 +12,20 @@ export function OrdersScreen({ onTrackOrder, onReorderOrder }) {
   const { C } = useTheme();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      const data = await getOrders();
-      if (mounted) {
-        setOrders(data || []);
-        setLoading(false);
+      try {
+        const data = await getOrders();
+        if (mounted) {
+          setOrders(data || []);
+        }
+      } catch (e) {
+        if (mounted) setError(e?.message || 'Unable to load orders.');
+      } finally {
+        if (mounted) setLoading(false);
       }
     };
     load();
@@ -35,12 +41,21 @@ export function OrdersScreen({ onTrackOrder, onReorderOrder }) {
 
   return (
     <ScreenContainer scroll contentContainerStyle={{ paddingBottom: 24 }}>
+      {!loading && orders.length === 0 ? (
+        <Card style={styles.card}>
+          <Text style={{ color: C.text, fontWeight: '700', marginBottom: 4 }}>No orders yet</Text>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>
+            Your medicine orders will appear here after checkout.
+          </Text>
+        </Card>
+      ) : null}
+      {error ? <Text style={{ color: C.danger, fontSize: 12, marginBottom: 10 }}>{error}</Text> : null}
       {orders.map((o) => {
         const conf = statusConfig[o.status] || statusConfig.in_transit;
         return (
           <Card key={o.id} hover style={styles.card}>
             <View style={styles.headerRow}>
-              <Text style={[styles.orderId, { color: C.text }]}>{o.id}</Text>
+              <Text style={[styles.orderId, { color: C.text }]}>{o.reference || o.id}</Text>
               <Badge label={conf.label} color={conf.color} />
             </View>
             <Text style={{ color: C.textSec, fontSize: 13, marginBottom: 8 }}>

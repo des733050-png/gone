@@ -3,6 +3,7 @@ import { getRecords } from '../api';
 
 export function useRecords() {
   const [records, setRecords] = useState([]);
+  const [sections, setSections] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -14,7 +15,14 @@ export function useRecords() {
         setLoading(true);
         setError(null);
         const data = await getRecords();
-        if (mounted) setRecords(data || []);
+        if (!mounted) return;
+        if (Array.isArray(data)) {
+          setRecords(data || []);
+          setSections(null);
+          return;
+        }
+        setRecords(data?.items || []);
+        setSections(data?.sections || null);
       } catch (err) {
         if (mounted) setError(err);
       } finally {
@@ -28,5 +36,5 @@ export function useRecords() {
     };
   }, []);
 
-  return { records, loading, error };
+  return { records, sections, loading, error };
 }

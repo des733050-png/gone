@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, StatusBar, StyleSheet, Platform, TouchableOpacity, Text } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -7,6 +7,8 @@ import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { SeoProvider } from './src/seo/SeoProvider';
 import { APP_CONFIG } from './src/config/env';
 import { PAGE_PATHS } from './src/seo/meta';
+import { getCurrentUser, logoutProvider } from './src/api';
+import { normalizeRole } from './src/config/roles';
 import { AuthScreen }                from './src/screens/auth/Auth';
 import { MainShell }                 from './src/screens/MainShell';
 import { HospitalOnboardingScreen }  from './src/screens/auth/Onboarding';
@@ -18,6 +20,24 @@ function RootNavigator() {
   const [user, setUser] = useState(null);
   // showOnboarding: true = new hospital registering (no existing account)
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const restoreSession = async () => {
+      try {
+        const sessionUser = await getCurrentUser();
+        if (active && sessionUser) {
+          setUser({ ...sessionUser, role: normalizeRole(sessionUser.role) });
+        }
+      } catch {
+        // Keep auth screen as fallback when no active session exists.
+      }
+    };
+    restoreSession();
+    return () => {
+      active = false;
+    };
+  }, []);
 
 
   // React Navigation linking config — gives each page a clean URL on web.
@@ -66,7 +86,7 @@ function RootNavigator() {
               <View style={{ flex: 1 }}>
                 <AuthScreen
                   {...props}
-                  onAuth={(u) => { setUser(u); }}
+                  onAuth={(u) => { setUser({ ...u, role: normalizeRole(u?.role) }); }}
                   appName={APP_CONFIG.APP_NAME}
                   onRegister={() => setShowOnboarding(true)}
                 />
@@ -79,8 +99,16 @@ function RootNavigator() {
               <MainShell
                 {...props}
                 user={user}
-                onLogout={() => setUser(null)}
-                onUpdateUser={setUser}
+                onLogout={async () => {
+                  try {
+                    await logoutProvider();
+                  } finally {
+                    setUser(null);
+                  }
+                }}
+                onUpdateUser={(nextUser) => {
+                  setUser(nextUser ? { ...nextUser, role: normalizeRole(nextUser.role) } : null);
+                }}
               />
             )}
           </Stack.Screen>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
 import { useResponsive } from '../../../theme/responsive';
@@ -7,17 +7,25 @@ import { Btn } from '../../../atoms/Btn';
 import { Badge } from '../../../atoms/Badge';
 import { Avatar } from '../../../atoms/Avatar';
 import { Icon } from '../../../atoms/Icon';
+import { SectionLoader } from '../../../atoms/SectionLoader';
 import { getOrders, getRecords } from '../../../api';
-import { useAppointments } from '../../../hooks/useAppointments';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
+import { getAppointmentStatusMeta } from '../../../utils/appointmentAlerts';
 
-export function DashboardScreen({ user, goTo, onOpenAppointment }) {
+export function DashboardScreen({
+  user,
+  goTo,
+  appointments = [],
+  loadingAppointments = false,
+  onOpenAppointment,
+  onOpenTrackOrder,
+}) {
   const { C } = useTheme();
   const { cardColumns } = useResponsive();
 
   const [orders, setOrders] = useState([]);
   const [records, setRecords] = useState([]);
-  const { appointments } = useAppointments();
+  const [appointmentsFilter, setAppointmentsFilter] = useState('upcoming');
 
   useEffect(() => {
     let mounted = true;
@@ -26,7 +34,7 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
         const [o, r] = await Promise.all([getOrders(), getRecords()]);
         if (mounted) {
           setOrders(o || []);
-          setRecords(r || []);
+          setRecords(Array.isArray(r) ? r : (r?.items || []));
         }
       } catch (e) {
         if (__DEV__) console.warn('[Dashboard] data load error:', e.message);
@@ -46,6 +54,45 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
   const appointmentColumns = Math.min(cardColumns || 1, 2);
   const appointmentCardBasis = appointmentColumns === 2 ? '48%' : '100%';
   const appointmentCardMarginRight = appointmentColumns === 2 ? '4%' : 0;
+  const upcomingAppointments = useMemo(() => {
+    const now = new Date();
+    return (appointments || []).filter((item) => {
+      if (item.status !== 'confirmed') return false;
+      if (!item.scheduled_for) return true;
+      const dt = new Date(item.scheduled_for);
+      if (Number.isNaN(dt.getTime())) return true;
+      return dt >= now;
+    });
+  }, [appointments]);
+  const dashboardUpcomingAppointments = useMemo(
+    () => upcomingAppointments.slice(0, 4),
+    [upcomingAppointments]
+  );
+  const pendingAppointments = useMemo(
+    () => (appointments || []).filter((item) => item.status === 'pending'),
+    [appointments]
+  );
+  const dashboardPendingAppointments = useMemo(
+    () => pendingAppointments.slice(0, 4),
+    [pendingAppointments]
+  );
+  const dashboardAppointmentItems =
+    appointmentsFilter === 'pending'
+      ? dashboardPendingAppointments
+      : dashboardUpcomingAppointments;
+  const activeOrder = orders.find((item) => item.status === 'in_transit') || null;
+  const activeOrderStatus = activeOrder?.status === 'delivered' ? 'Delivered' : 'In Transit';
+  const activeOrderStatusColor = activeOrder?.status === 'delivered' ? 'success' : 'warning';
+  const profileMeta = [
+    user?.blood_group ? `Blood Group: ${user.blood_group}` : null,
+    user?.age ? `Age ${user.age}` : null,
+  ].filter(Boolean);
+  const stats = [
+    { icon: { lib: 'feather', name: 'calendar' }, label: 'Upcoming Appointments', value: String(upcomingAppointments.length) },
+    { icon: { lib: 'mc', name: 'pill' }, label: 'Orders', value: String(orders.length) },
+    { icon: { lib: 'mc', name: 'file-document-outline' }, label: 'Records', value: String(records.length) },
+    { icon: { lib: 'feather', name: 'truck' }, label: 'Active Deliveries', value: String(orders.filter((item) => item.status === 'in_transit').length) },
+  ];
 
   return (
     <ScreenContainer scroll>
@@ -57,8 +104,7 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
           {user.first_name} {user.last_name}
         </Text>
         <Text style={styles.heroMeta}>
-          Blood Group: <Text style={styles.heroMetaStrong}>{user.blood_group}</Text> · NHIF Insured · Age{' '}
-          {user.age}
+          {profileMeta.length ? profileMeta.join(' · ') : 'Welcome to your patient dashboard'}
         </Text>
         <View style={styles.heroActions}>
           {[
@@ -81,12 +127,7 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
       </View>
 
       <View style={styles.statsRow}>
-        {[
-          { icon: { lib: 'feather', name: 'activity' }, label: 'Heart Rate', value: '72 bpm' },
-          { icon: { lib: 'mc', name: 'water' }, label: 'Blood Pressure', value: '122/80' },
-          { icon: { lib: 'feather', name: 'calendar' }, label: 'Next Appointment', value: 'Today 2:30 PM' },
-          { icon: { lib: 'mc', name: 'pill' }, label: 'Active Rx', value: '2 medicines' },
-        ].map((s, idx) => (
+        {stats.map((s, idx) => (
           <Card
             key={s.label}
             hover
@@ -112,12 +153,30 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
         <View style={styles.sectionHeader}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Icon name="calendar" lib="feather" size={16} color={C.primary} style={{ marginRight: 6 }} />
-            <Text style={[styles.sectionTitle, { color: C.text }]}>Upcoming Appointments</Text>
+            <Text style={[styles.sectionTitle, { color: C.text }]}>Appointments</Text>
           </View>
           <Btn label="View All" onPress={() => goTo('appointments')} variant="ghost" size="sm" />
         </View>
+        <View style={styles.dashboardFilterRow}>
+          <Btn
+            label={`Upcoming (${upcomingAppointments.length})`}
+            variant={appointmentsFilter === 'upcoming' ? 'primary' : 'ghost'}
+            size="sm"
+            onPress={() => setAppointmentsFilter('upcoming')}
+          />
+          <Btn
+            label={`Pending (${pendingAppointments.length})`}
+            variant={appointmentsFilter === 'pending' ? 'primary' : 'ghost'}
+            size="sm"
+            style={{ marginLeft: 8 }}
+            onPress={() => setAppointmentsFilter('pending')}
+          />
+        </View>
         <View style={styles.appointmentsRow}>
-          {appointments.map((a, idx) => (
+          {loadingAppointments ? <SectionLoader label="Loading appointments..." /> : null}
+          {dashboardAppointmentItems.map((a, idx) => {
+            const statusMeta = getAppointmentStatusMeta(a.status);
+            return (
             <Card
               key={a.id}
               hover
@@ -148,8 +207,8 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
                   </View>
                 </View>
                 <Badge
-                  label={a.status}
-                  color={a.status === 'confirmed' ? 'success' : 'warning'}
+                  label={statusMeta.label}
+                  color={statusMeta.color}
                 />
               </View>
               <View style={{ marginTop: 10, flexDirection: 'row', justifyContent: 'flex-end' }}>
@@ -161,7 +220,22 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
                 />
               </View>
             </Card>
-          ))}
+            );
+          })}
+          {!loadingAppointments && dashboardAppointmentItems.length === 0 ? (
+            <Card style={styles.emptyCard}>
+              <Text style={[styles.emptyTitle, { color: C.text }]}>
+                {appointmentsFilter === 'pending'
+                  ? 'No pending appointments'
+                  : 'No upcoming appointments'}
+              </Text>
+              <Text style={[styles.emptyBody, { color: C.textMuted }]}>
+                {appointmentsFilter === 'pending'
+                  ? 'Pending confirmation appointments will appear here.'
+                  : 'Upcoming appointments will appear here when booked.'}
+              </Text>
+            </Card>
+          ) : null}
         </View>
       </View>
 
@@ -171,7 +245,14 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
             <Icon name="truck-delivery" lib="mc" size={16} color={C.warning} style={{ marginRight: 6 }} />
             <Text style={[styles.sectionTitle, { color: C.text }]}>Active Order</Text>
           </View>
-          <Btn label="Track" onPress={() => goTo('track')} size="sm" />
+          <Btn
+            label="Track"
+            onPress={() => {
+              if (onOpenTrackOrder) onOpenTrackOrder(activeOrder?.id || null);
+              else goTo('track');
+            }}
+            size="sm"
+          />
         </View>
         <Card
           style={[
@@ -179,38 +260,37 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
             { borderColor: C.warning, backgroundColor: C.warningLight },
           ]}
         >
-          <View style={styles.activeOrderHeader}>
-            <Text style={[styles.activeOrderId, { color: C.text }]}>ORD-001</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Icon name="bike" lib="mc" size={14} color={C.warning} style={{ marginRight: 4 }} />
-              <Badge label="In Transit" color="warning" />
-            </View>
-          </View>
-          {orders[0] ? (
-            <Text style={{ color: C.textSec, fontSize: 13, marginBottom: 10 }}>
-              {orders[0].items.map((i) => i.name).join(', ')}
-            </Text>
-          ) : null}
-          <View style={styles.activeOrderFooter}>
-            <Avatar name="Kevin Mwangi" size={32} />
-            <View style={{ marginLeft: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={{ color: C.text, fontWeight: '600', fontSize: 13, marginRight: 4 }}>
-                  Kevin M.
+          {activeOrder ? (
+            <>
+              <View style={styles.activeOrderHeader}>
+                <Text style={[styles.activeOrderId, { color: C.text }]}>
+                  {activeOrder.reference || activeOrder.id}
                 </Text>
-                <Icon name="star" lib="feather" size={13} color={C.warning} style={{ marginRight: 2 }} />
-                <Text style={{ color: C.text, fontWeight: '600', fontSize: 13 }}>4.9</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Icon name="bike" lib="mc" size={14} color={C.warning} style={{ marginRight: 4 }} />
+                  <Badge label={activeOrderStatus} color={activeOrderStatusColor} />
+                </View>
               </View>
-              {orders[0] ? (
-                <Text style={{ color: C.success, fontSize: 12, fontWeight: '600' }}>
-                  ETA {orders[0].eta}
-                </Text>
-              ) : null}
-            </View>
-            <View style={{ marginLeft: 'auto' }}>
-              <Btn label="Chat" variant="ghost" size="sm" />
-            </View>
-          </View>
+              <Text style={{ color: C.textSec, fontSize: 13, marginBottom: 10 }}>
+                {activeOrder.items.map((i) => i.name).join(', ')}
+              </Text>
+              <View style={styles.activeOrderFooter}>
+                <Avatar name={activeOrder.rider_name || 'Rider'} size={32} />
+                <View style={{ marginLeft: 8 }}>
+                  <Text style={{ color: C.text, fontWeight: '600', fontSize: 13 }}>
+                    {activeOrder.rider_name || 'Rider'}
+                  </Text>
+                  <Text style={{ color: C.success, fontSize: 12, fontWeight: '600' }}>
+                    ETA {activeOrder.eta || '--'}
+                  </Text>
+                </View>
+              </View>
+            </>
+          ) : (
+            <Text style={{ color: C.textMuted, fontSize: 12 }}>
+              No active order in transit right now.
+            </Text>
+          )}
         </Card>
       </View>
 
@@ -222,7 +302,7 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
           </View>
           <Btn label="View All" onPress={() => goTo('records')} variant="ghost" size="sm" />
         </View>
-        {records.map((r) => (
+        {records.slice(0, 3).map((r) => (
           <Card key={r.id} hover style={styles.recordCard}>
             <View style={styles.recordRow}>
               <View style={[styles.recordIcon, { backgroundColor: `${r.color}20` }]}>
@@ -238,6 +318,14 @@ export function DashboardScreen({ user, goTo, onOpenAppointment }) {
             </View>
           </Card>
         ))}
+        {records.length === 0 ? (
+          <Card style={styles.emptyCard}>
+            <Text style={[styles.emptyTitle, { color: C.text }]}>No records yet</Text>
+            <Text style={[styles.emptyBody, { color: C.textMuted }]}>
+              Recent medical records will appear here after consultations or lab results.
+            </Text>
+          </Card>
+        ) : null}
       </View>
     </ScreenContainer>
   );
@@ -261,6 +349,7 @@ const styles = StyleSheet.create({
   section: { marginBottom: 18 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   sectionTitle: { fontSize: 15, fontWeight: '700' },
+  dashboardFilterRow: { flexDirection: 'row', marginBottom: 10 },
   appointmentCard: { marginBottom: 10 },
   appointmentsRow: { flexDirection: 'row', flexWrap: 'wrap' },
   appointmentRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
@@ -278,4 +367,7 @@ const styles = StyleSheet.create({
   recordIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   recordTitle: { fontWeight: '700', fontSize: 13, marginBottom: 2 },
   recordSub: { fontSize: 11 },
+  emptyCard: { marginBottom: 8 },
+  emptyTitle: { fontWeight: '700', fontSize: 13, marginBottom: 4 },
+  emptyBody: { fontSize: 12 },
 });

@@ -6,13 +6,13 @@
 // Charts are rendered as custom SVG/View compositions — no third-party chart
 // library required, keeping the bundle lean and offline-safe.
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
 import { Card } from '../../../atoms/Card';
 import { Icon } from '../../../atoms/Icon';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
-import { MOCK_ANALYTICS } from '../../../mock/data';
+import { getAnalytics } from '../../../api';
 
 const W = Math.min(Dimensions.get('window').width - 48, 500);
 const BAR_H = 140;
@@ -134,8 +134,43 @@ function KpiCard({ icon, label, value, sub, color, C }) {
 // ─── AnalyticsScreen ──────────────────────────────────────────────────────────
 export function AnalyticsScreen({ user }) {
   const { C } = useTheme();
-  const a = MOCK_ANALYTICS;
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const isBilling = user?.role === 'billing_manager';
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError('');
+    getAnalytics()
+      .then((payload) => {
+        if (mounted) setData(payload || null);
+      })
+      .catch((err) => {
+        if (mounted) setError(err?.message || 'Unable to load analytics.');
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const a = useMemo(
+    () =>
+      data || {
+        revenue_over_time: [],
+        revenue_by_service: [],
+        billing_status: { paid: 0, pending: 0, overdue: 0 },
+        inventory_value: [],
+        top_drugs: [],
+        appointment_volume: [],
+        website_earnings: { total: 0, this_month: 0, orders: 0, avg_order: 0, top_products: [] },
+      },
+    [data]
+  );
 
   const billingStatus = [
     { label: 'Paid',    value: a.billing_status.paid    },
@@ -149,6 +184,14 @@ export function AnalyticsScreen({ user }) {
 
   return (
     <ScreenContainer scroll>
+      {loading && <Text style={{ color: C.textMuted, marginBottom: 12 }}>Loading analytics...</Text>}
+      {!!error && <Text style={{ color: C.danger, marginBottom: 12 }}>{error}</Text>}
+      {!loading && !error && !data && (
+        <Card style={{ marginBottom: 12 }}>
+          <Text style={{ color: C.text, fontWeight: '700', marginBottom: 4 }}>No analytics data yet</Text>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>Analytics will appear when backend data is available for your role.</Text>
+        </Card>
+      )}
       {/* KPI summary */}
       <View style={styles.kpiRow}>
         <KpiCard icon="dollar-sign" label="Total revenue" value={fmt(totalRevenue)} sub={`${fmt(thisMonthRev)} this month`} color={C.primary} C={C} />

@@ -244,7 +244,13 @@ export function AppointmentsTab({ appointments }) {
               <Text style={[s.rxSub,  { color: C.textSec }]}>{a.type} · {a.date} {a.time}</Text>
             </View>
             <Badge label={a.status}
-              color={a.status === 'confirmed' ? 'success' : a.status === 'unassigned' ? 'danger' : 'warning'} />
+              color={
+                a.status === 'confirmed' || a.status === 'completed'
+                  ? 'success'
+                  : a.status === 'unassigned' || a.status === 'cancelled'
+                    ? 'danger'
+                    : 'warning'
+              } />
           </View>
         </Card>
       ))}

@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { getVitals } from '../api';
 
-export function useVitals() {
+export function useVitals(enabled = true) {
   const [vitals, setVitals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setVitals([]);
+      setLoading(false);
+      setError(null);
+      return undefined;
+    }
     let mounted = true;
 
     const load = async () => {
@@ -26,7 +32,7 @@ export function useVitals() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [enabled]);
 
   return { vitals, loading, error };
 }

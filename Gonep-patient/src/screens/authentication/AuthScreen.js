@@ -1,14 +1,26 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar,
+} from 'react-native';
 import { useTheme } from '../../theme/ThemeContext';
+import { useResponsive } from '../../theme/responsive';
 import { Btn } from '../../atoms/Btn';
 import { Input } from '../../atoms/Input';
 import { Icon } from '../../atoms/Icon';
 import { APP_CONFIG, IS_MOCK } from '../../config/env';
-import { loginPatient, registerPatient } from '../../api';
+import { getCurrentUser, loginPatient, registerPatient } from '../../api';
 
 export function AuthScreen({ onAuth, appName }) {
   const { C, isDark, toggle } = useTheme();
+  const { isSmall } = useResponsive();
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({
     email: '',
@@ -58,7 +70,8 @@ export function AuthScreen({ onAuth, appName }) {
           email: form.email.trim(),
           password: form.password,
         });
-        onAuth(user);
+        const hydratedUser = await getCurrentUser().catch(() => null);
+        onAuth(hydratedUser || user);
       } else {
         const user = await registerPatient({
           email: form.email.trim(),
@@ -67,7 +80,8 @@ export function AuthScreen({ onAuth, appName }) {
           last_name: form.last_name.trim(),
           phone: form.phone.trim(),
         });
-        onAuth(user);
+        const hydratedUser = await getCurrentUser().catch(() => null);
+        onAuth(hydratedUser || user);
       }
     } catch (err) {
       setGlobalErr(err?.message || 'Unable to complete authentication request.');
@@ -87,23 +101,19 @@ export function AuthScreen({ onAuth, appName }) {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: C.bg }]}>
+    <KeyboardAvoidingView
+      style={[styles.root, { backgroundColor: C.bg }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <View style={styles.decorTop} />
       <View style={styles.decorBottom} />
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, isSmall && styles.scrollSmall]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         <View style={styles.cardWrapper}>
-          <View style={styles.logoWrap}>
-            <View style={[styles.logo, { backgroundColor: C.primary }]}>
-              <Image
-                source={require('../../../assets/logo.png')}
-                style={{ width: 40, height: 40 }}
-                resizeMode="contain"
-              />
-            </View>
-            <Text style={[styles.appTitle, { color: C.text }]}>{appName}</Text>
-            <Text style={[styles.appSubtitle, { color: C.primary }]}>Patient Portal</Text>
-          </View>
-
           <View style={[styles.authCard, { backgroundColor: C.card, borderColor: C.border }]}>
             <View style={[styles.modeToggle, { backgroundColor: C.bg }]}>
               {['login', 'register'].map((m) => (
@@ -149,7 +159,13 @@ export function AuthScreen({ onAuth, appName }) {
               ))}
             </View>
 
-            <ScrollView style={styles.formScroll} contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={styles.formScroll}
+              contentContainerStyle={{ paddingBottom: 16 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
               <Text style={[styles.heading, { color: C.text }]}>
                 {mode === 'login' ? 'Welcome back!' : 'Create your account'}
               </Text>
@@ -167,11 +183,11 @@ export function AuthScreen({ onAuth, appName }) {
               ) : null}
 
               {mode === 'register' && (
-                <View style={styles.row}>
-                  <View style={{ flex: 1, marginRight: 6 }}>
+                <View style={[styles.row, isSmall && styles.rowStack]}>
+                  <View style={[styles.nameField, isSmall ? styles.nameFieldFull : styles.nameFieldLeft]}>
                     <Input label="First Name" placeholder="Faith" value={form.first_name} onChangeText={(v) => set('first_name', v)} error={errors.first_name} />
                   </View>
-                  <View style={{ flex: 1, marginLeft: 6 }}>
+                  <View style={[styles.nameField, isSmall ? styles.nameFieldFull : styles.nameFieldRight]}>
                     <Input label="Last Name" placeholder="Njoroge" value={form.last_name} onChangeText={(v) => set('last_name', v)} error={errors.last_name} />
                   </View>
                 </View>
@@ -224,6 +240,18 @@ export function AuthScreen({ onAuth, appName }) {
             </View>
           </View>
 
+          <View style={[styles.logoWrap, isSmall && styles.logoWrapSmall]}>
+            <View style={[styles.logo, { backgroundColor: C.primary }]}>
+              <Image
+                source={require('../../../assets/logo.png')}
+                style={{ width: 40, height: 40 }}
+                resizeMode="contain"
+              />
+            </View>
+            <Text style={[styles.appTitle, { color: C.text }]}>{appName}</Text>
+            <Text style={[styles.appSubtitle, { color: C.primary }]}>Patient Portal</Text>
+          </View>
+
           <TouchableOpacity onPress={toggle} style={[styles.themeToggle, { borderColor: C.border }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Icon name={isDark ? 'sun' : 'moon'} lib="feather" size={12} color={C.textMuted} style={{ marginRight: 6 }} />
@@ -232,7 +260,7 @@ export function AuthScreen({ onAuth, appName }) {
           </TouchableOpacity>
         </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -257,8 +285,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(14,165,233,0.08)',
   },
   scroll: { flexGrow: 1, paddingHorizontal: 20, paddingVertical: 30, justifyContent: 'center' },
+  scrollSmall: {
+    paddingHorizontal: 14,
+    paddingBottom: 16,
+    paddingTop: (StatusBar.currentHeight || 0) + 30,
+    justifyContent: 'flex-start',
+  },
   cardWrapper: { maxWidth: 460, width: '100%', alignSelf: 'center' },
-  logoWrap: { alignItems: 'center', marginBottom: 20 },
+  logoWrap: { alignItems: 'center', marginTop: 16, marginBottom: 4 },
+  logoWrapSmall: { marginTop: 12 },
   logo: {
     width: 64,
     height: 64,
@@ -277,6 +312,11 @@ const styles = StyleSheet.create({
   subheading: { fontSize: 13, marginBottom: 16 },
   alert: { borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
   row: { flexDirection: 'row' },
+  rowStack: { flexDirection: 'column' },
+  nameField: { flex: 1 },
+  nameFieldLeft: { marginRight: 6 },
+  nameFieldRight: { marginLeft: 6 },
+  nameFieldFull: { marginLeft: 0, marginRight: 0 },
   footer: { paddingHorizontal: 18, paddingVertical: 14, borderTopWidth: 1 },
   orRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 10, justifyContent: 'center' },
   orLine: { flex: 1, height: 1, marginHorizontal: 8 },

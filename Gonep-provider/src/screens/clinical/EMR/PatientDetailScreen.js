@@ -97,6 +97,9 @@ export function PatientDetailScreen({ patient, user, onBack }) {
         }}
         showsVerticalScrollIndicator={false}
       >
+        {!!pd.error && (
+          <Text style={{ color: C.danger, marginBottom: 10 }}>{pd.error}</Text>
+        )}
         {(RENDER_TAB[pd.activeTab] || RENDER_TAB.overview)()}
       </ScrollView>
 

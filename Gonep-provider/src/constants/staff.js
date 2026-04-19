@@ -2,6 +2,9 @@
 
 export const ROLE_OPTS = ['doctor', 'billing_manager', 'lab_manager', 'receptionist'];
 
+/** Roles that can be assigned from Add member (includes patient portal invite). */
+export const INVITE_ROLE_OPTS = ['doctor', 'billing_manager', 'lab_manager', 'receptionist', 'patient'];
+
 export const ROLE_FILTER_OPTIONS = ['all', 'doctor', 'billing_manager', 'lab_manager', 'receptionist'];
 
 export const PERMS = {
@@ -17,4 +20,5 @@ export const ROLE_DESC = {
   billing_manager: 'Billing and invoices only',
   lab_manager:     'Lab results, inventory, pharmacy',
   receptionist:    'Appointment scheduling only',
+  patient:         'Patient app only — not listed under staff; receives portal login details',
 };

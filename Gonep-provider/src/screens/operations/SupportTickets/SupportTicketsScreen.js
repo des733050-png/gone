@@ -41,6 +41,8 @@ export function SupportTicketsScreen({ user, filter: propFilter }) {
         subtitle={subtitle}
         action={<Btn label="+ New ticket" size="sm" onPress={() => st.setNewModal(true)} />}
       />
+      {st.loading && <Text style={{ color: C.textMuted, marginBottom: 12 }}>Loading tickets...</Text>}
+      {!!st.error && <Text style={{ color: C.danger, marginBottom: 12 }}>{st.error}</Text>}
 
       {/* Filter tabs */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>

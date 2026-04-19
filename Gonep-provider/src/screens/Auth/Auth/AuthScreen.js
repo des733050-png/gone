@@ -14,6 +14,7 @@ import { Btn } from '../../../atoms/Btn';
 import { Input } from '../../../atoms/Input';
 import { Icon } from '../../../atoms/Icon';
 import { APP_CONFIG, IS_MOCK } from '../../../config/env';
+import { getCurrentUser, loginProvider } from '../../../api';
 import { DEMO_ACCOUNTS } from '../../../mock/data';
 import { ROLE_LABELS, ROLE_COLORS } from '../../../config/roles';
 
@@ -28,6 +29,7 @@ export function AuthScreen({ onAuth, appName, onRegister }) {
   const [loading,   setLoading]   = useState(false);
   const [globalErr, setGlobalErr] = useState('');
   const [showDemo,  setShowDemo]  = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
@@ -45,21 +47,32 @@ export function AuthScreen({ onAuth, appName, onRegister }) {
   const submit = async () => {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setLoading(true); setGlobalErr('');
-    await new Promise(r => setTimeout(r, 800));
-    if (IS_MOCK) {
-      const match = DEMO_ACCOUNTS.find(
-        a => a.user.email.toLowerCase() === form.email.toLowerCase()
-      );
-      if (match && form.password === APP_CONFIG.DEMO_PASSWORD) {
-        onAuth(match.user);
-      } else {
+    setLoading(true);
+    setGlobalErr('');
+    try {
+      if (IS_MOCK) {
+        await new Promise(r => setTimeout(r, 400));
+        const match = DEMO_ACCOUNTS.find(
+          a => a.user.email.toLowerCase() === form.email.toLowerCase()
+        );
+        if (match && form.password === APP_CONFIG.DEMO_PASSWORD) {
+          onAuth(match.user);
+          return;
+        }
         setGlobalErr('Invalid credentials. Use a demo account to sign in.');
+      } else {
+        const user = await loginProvider({
+          email: form.email.trim(),
+          password: form.password,
+        });
+        const hydratedUser = await getCurrentUser().catch(() => null);
+        onAuth(hydratedUser || user);
       }
-    } else {
-      setGlobalErr('Unable to reach authentication server. Check your connection.');
+    } catch (error) {
+      setGlobalErr(error?.message || 'Unable to complete authentication request.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const fillDemo = account => {
@@ -122,9 +135,11 @@ export function AuthScreen({ onAuth, appName, onRegister }) {
                 label="Password"
                 value={form.password}
                 onChangeText={v => set('password', v)}
-                secureTextEntry
+                secureTextEntry={!isPasswordVisible}
                 icon="lock"
                 error={errors.password}
+                onToggleSecure={() => setIsPasswordVisible(v => !v)}
+                isSecureVisible={isPasswordVisible}
               />
 
               {globalErr ? (

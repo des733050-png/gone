@@ -24,13 +24,14 @@ const _timeout  = process.env.EXPO_PUBLIC_API_TIMEOUT_MS;
 
 // ─── API config ───────────────────────────────────────────────────────────
 const normalizedBaseUrl = (_baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
+const normalizedMode = String(_mode || 'mock').trim().toLowerCase();
 
 export const API_CONFIG = Object.freeze({
   BASE_URL:   normalizedBaseUrl,
   TIMEOUT_MS: Number(_timeout || '15000'),
   // Supported: 'mock' | 'development' | 'staging' | 'production'
   // Fallback 'mock' means the app works on a fresh clone with no .env
-  MODE:       _mode     || 'mock',
+  MODE:       normalizedMode,
 });
 
 // ─── Base path ────────────────────────────────────────────────────────────
@@ -49,7 +50,14 @@ export const APP_CONFIG = Object.freeze({
 // Strings for fixed endpoints. Arrow functions for endpoints needing an ID.
 // Add new endpoints here only — never hardcode URLs in screens or hooks.
 export const ENDPOINTS = Object.freeze({
+  authCsrf:           `${API_CONFIG.BASE_URL}/api/v1/auth/csrf/`,
+  authLogin:          `${API_CONFIG.BASE_URL}/api/v1/auth/login/`,
+  authMobileToken:    `${API_CONFIG.BASE_URL}/api/v1/auth/mobile-token/`,
+  authLogout:         `${API_CONFIG.BASE_URL}/api/v1/auth/logout/`,
+  authSession:        `${API_CONFIG.BASE_URL}/api/v1/auth/session/`,
+  authRegisterPatient:`${API_CONFIG.BASE_URL}/api/v1/auth/register/patient/`,
   currentUser:        `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/me/`,
+  patientSettings:    `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/settings/`,
   appointments:       `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/appointments/`,
   appointmentDetail:  (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/appointments/${id}/`,
   appointmentUpdate:  (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/appointments/${id}/`,
@@ -57,10 +65,15 @@ export const ENDPOINTS = Object.freeze({
   orderDetail:        (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/orders/${id}/`,
   orderReorder:       (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/orders/${id}/reorder/`,
   records:            `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/records/`,
+  recordDetail:       (id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/records/${id}/`,
   recordsCurrentUser: `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/records/me/`,
   vitals:             `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/vitals/`,
   chatThread:         `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/chat/thread/`,
   notifications:      `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/notifications/`,
+  notificationsReadAll:`${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/notifications/read-all/`,
+  supportTickets:     `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/support-tickets/`,
+  supportTicketDetail:(id) => `${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/support-tickets/${id}/`,
+  patientEventsStream:`${API_CONFIG.BASE_URL}${PATIENT_BASE_PATH}/events/stream/`,
 });
 
 // ─── Mode flags ───────────────────────────────────────────────────────────

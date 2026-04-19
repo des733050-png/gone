@@ -24,12 +24,17 @@
  */
 
 export const ROLES = {
+  FACILITY_ADMIN:  'facility_admin',
   HOSPITAL_ADMIN:  'hospital_admin',
   DOCTOR:          'doctor',
   BILLING_MANAGER: 'billing_manager',
   LAB_MANAGER:     'lab_manager',
   RECEPTIONIST:    'receptionist',
   POS:             'pos',
+};
+
+const ROLE_ALIASES = {
+  facility_admin: ROLES.HOSPITAL_ADMIN,
 };
 
 /**
@@ -51,14 +56,19 @@ const ROLE_NAV = {
   pos:             ['pos'], // POS role renders a completely different shell
 };
 
+export function normalizeRole(role) {
+  return ROLE_ALIASES[role] || role;
+}
+
 /** Returns the list of allowed page ids for a given role. */
 export function getAllowedPages(role) {
-  return ROLE_NAV[role] || ROLE_NAV.doctor;
+  const normalizedRole = normalizeRole(role);
+  return ROLE_NAV[normalizedRole] || ROLE_NAV.doctor;
 }
 
 /** Returns true if a role can access a specific page. */
 export function canAccess(role, pageId) {
-  return getAllowedPages(role).includes(pageId);
+  return getAllowedPages(normalizeRole(role)).includes(pageId);
 }
 
 /**
@@ -71,12 +81,14 @@ export function isOwnDataOnly(role) {
 
 /** Human-readable role labels — used in sidebar, TopBar user menu, StaffScreen chips */
 export const ROLE_LABELS = {
-  hospital_admin:  'Hospital Admin',
+  facility_admin:  'Facility Admin',
+  hospital_admin:  'Facility Admin',
   doctor:          'Doctor',
   billing_manager: 'Billing Manager',
   lab_manager:     'Lab & Pharmacy Mgr',
   receptionist:    'Receptionist',
   pos:             'POS Terminal',
+  patient:         'Patient portal',
 };
 
 /**
@@ -84,6 +96,7 @@ export const ROLE_LABELS = {
  * Keys must match properties in the theme (C.primary, C.purple, etc.)
  */
 export const ROLE_COLORS = {
+  facility_admin:  'primary',
   hospital_admin:  'primary',
   doctor:          'purple',
   billing_manager: 'warning',

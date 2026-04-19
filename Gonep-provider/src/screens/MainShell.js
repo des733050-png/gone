@@ -12,7 +12,7 @@ import { useResponsive } from '../theme/responsive';
 import { Sidebar } from '../organisms/Sidebar';
 import { TopBar } from '../organisms/TopBar';
 import { PageSeo } from '../seo/PageSeo';
-import { getAllowedPages } from '../config/roles';
+import { getAllowedPages, normalizeRole } from '../config/roles';
 import { getNotifications } from '../api';
 
 import { DashboardScreen, AppointmentsScreen, AvailabilityScreen,
@@ -253,23 +253,24 @@ function iconForPage(pageId) {
 export function MainShell({ user, onLogout, onUpdateUser }) {
   const { C, toggle, isDark } = useTheme();
   const { sidebarDocked }     = useResponsive();
+  const userRole = normalizeRole(user.role);
 
-  const allowedPages = useMemo(() => getAllowedPages(user.role), [user.role]);
+  const allowedPages = useMemo(() => getAllowedPages(userRole), [userRole]);
 
   // Build the filtered nav tree for this role
   const navTree = useMemo(() => {
     const result = [];
     for (const group of ALL_NAV_TREE) {
       // Skip entire section if role not in section roles
-      if (group.roles && !group.roles.includes(user.role)) continue;
+      if (group.roles && !group.roles.includes(userRole)) continue;
 
       const items = group.items
-        .filter(item => !item.roles || item.roles.includes(user.role))
+        .filter(item => !item.roles || item.roles.includes(userRole))
         .filter(item => allowedPages.includes(item.id))
         .map(item => ({
           ...item,
           sub: item.sub
-            ? item.sub.filter(s => !s.roles || s.roles.includes(user.role))
+            ? item.sub.filter(s => !s.roles || s.roles.includes(userRole))
             : undefined,
         }));
 
@@ -278,7 +279,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
       }
     }
     return result;
-  }, [user.role, allowedPages]);
+  }, [userRole, allowedPages]);
 
   // Flat list for TopBar and legacy props
   const navItems = useMemo(() =>
@@ -333,7 +334,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
   }, [page, user, notifUnread]);
 
   // POS role renders a completely different fullscreen interface
-  if (user?.role === 'pos') {
+  if (userRole === 'pos') {
     return (
       <View style={[styles.root, { backgroundColor: C.bg }]}>
         <POSScreen user={user} onLogout={onLogout} />
@@ -351,13 +352,13 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
       case 'lab':           return <LabScreen          user={user} filter={pageFilter} />;
       case 'billing':       return <BillingScreen      filter={pageFilter} />;
       case 'inventory':     return <InventoryScreen    user={user} filter={pageFilter} />;
-      case 'staff':         return <StaffScreen        filter={pageFilter} />;
+      case 'staff':         return <StaffScreen        user={user} filter={pageFilter} />;
       case 'logs':          return <LogsScreen           user={user} />;
       case 'analytics':    return <AnalyticsScreen      user={user} />;
       case 'support':      return <SupportTicketsScreen  user={user} filter={pageFilter} />;
       case 'notifications': return <NotificationsScreen onRead={refreshUnread} />;
       case 'profile':       return <ProfileScreen      user={user} onUpdateUser={onUpdateUser} />;
-      case 'settings':      return <SettingsScreen />;
+      case 'settings':      return <SettingsScreen user={user} onLogout={onLogout} />;
       default:              return <DashboardScreen    user={user} goTo={goTo} />;
     }
   };

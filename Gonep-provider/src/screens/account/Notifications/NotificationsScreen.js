@@ -11,9 +11,26 @@ import { getNotifications, markNotificationRead, markAllNotificationsRead } from
 export function NotificationsScreen({ onRead }) {
   const { C } = useTheme();
   const [notifs, setNotifs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    getNotifications().then(n => setNotifs(n || []));
+    let mounted = true;
+    setLoading(true);
+    setError('');
+    getNotifications()
+      .then((n) => {
+        if (mounted) setNotifs(n || []);
+      })
+      .catch((err) => {
+        if (mounted) setError(err?.message || 'Unable to load notifications.');
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const markAll = useCallback(async () => {
@@ -40,6 +57,14 @@ export function NotificationsScreen({ onRead }) {
         </View>
         <Btn label="Mark all read" onPress={markAll} variant="ghost" size="sm" />
       </View>
+      {loading && <Text style={{ color: C.textMuted, marginBottom: 12 }}>Loading notifications...</Text>}
+      {!!error && <Text style={{ color: C.danger, marginBottom: 12 }}>{error}</Text>}
+      {!loading && !error && notifs.length === 0 && (
+        <Card style={{ padding: 14 }}>
+          <Text style={{ color: C.text, fontWeight: '700', marginBottom: 4 }}>No notifications</Text>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>New platform updates and events will appear here.</Text>
+        </Card>
+      )}
       {notifs.map(n => (
         <Card key={n.id} hover onPress={() => markOne(n.id)}
           style={[styles.card, { borderLeftColor: n.read ? C.border : colorMap[n.color] || C.primary, borderLeftWidth: 3, opacity: n.read ? 0.7 : 1 }]}>

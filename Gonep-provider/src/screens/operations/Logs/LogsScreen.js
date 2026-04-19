@@ -6,39 +6,105 @@ import { Badge } from '../../../atoms/Badge';
 import { Icon } from '../../../atoms/Icon';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
 import { getActivityLogs } from '../../../api';
-import { MOCK_STAFF } from '../../../mock/data';
 import { ROLE_LABELS } from '../../../config/roles';
 
-const MODULES = ['All', 'Appointments', 'Prescription', 'Inventory', 'Billing', 'Staff', 'EMR', 'Availability'];
-const DATE_FILTERS = ['All time', 'Today', 'Yesterday', 'This week'];
+const MODULES = ['All', 'Appointments', 'Prescription', 'Inventory', 'Billing', 'Staff', 'EMR', 'Availability', 'Support'];
+const DATE_FILTERS = ['All time', 'Today', 'Yesterday', 'This week', 'This month'];
+
+const ROLE_FILTER_IDS = [
+  { id: 'all', label: 'All roles' },
+  { id: 'doctor', label: ROLE_LABELS.doctor },
+  { id: 'receptionist', label: ROLE_LABELS.receptionist },
+  { id: 'facility_admin', label: ROLE_LABELS.facility_admin },
+  { id: 'billing_manager', label: ROLE_LABELS.billing_manager },
+  { id: 'lab_manager', label: ROLE_LABELS.lab_manager },
+];
 
 const MODULE_COLORS = {
   Appointments: 'primary',
   Prescription: 'success',
-  Inventory:    'warning',
-  Billing:      'danger',
-  Staff:        'purple',
-  EMR:          'primary',
+  Inventory: 'warning',
+  Billing: 'danger',
+  Staff: 'purple',
+  EMR: 'primary',
   Availability: 'success',
+  Support: 'primary',
 };
 
 const ROLE_COLORS_MAP = {
-  hospital_admin:  '#1A6FE8',
-  doctor:          '#8B5CF6',
+  hospital_admin: '#1A6FE8',
+  facility_admin: '#1A6FE8',
+  doctor: '#8B5CF6',
   billing_manager: '#F59E0B',
-  lab_manager:     '#10B981',
-  receptionist:    '#F97316',
+  lab_manager: '#10B981',
+  receptionist: '#F97316',
 };
 
-export function LogsScreen({ user }) {
-  const { C } = useTheme();
-  const [logs,       setLogs]       = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [modFilter,  setModFilter]  = useState('All');
-  const [dateFilter, setDateFilter] = useState('All time');
-  const [staffFilter,setStaffFilter]= useState('All');
+function startOfLocalDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
 
-  const staffNames = ['All', ...new Set(MOCK_STAFF.map(s => `${s.first_name} ${s.last_name}`))];
+function mondayOfWeekContaining(d) {
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const mon = new Date(d);
+  mon.setDate(d.getDate() + diff);
+  mon.setHours(0, 0, 0, 0);
+  return mon;
+}
+
+function sundayEndOfWeekContaining(d) {
+  const mon = mondayOfWeekContaining(d);
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  sun.setHours(23, 59, 59, 999);
+  return sun;
+}
+
+/** Best-effort instant for log rows (prefers API `occurred_at`). */
+function logOccurredAt(log) {
+  if (log.occurred_at) {
+    const d = new Date(log.occurred_at);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const now = new Date();
+  const ts = String(log.ts || '');
+  const m = ts.match(/(\d{1,2}):(\d{2})/);
+  if (ts.startsWith('Today')) {
+    const d = new Date(now);
+    if (m) d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    return d;
+  }
+  if (ts.startsWith('Yesterday')) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    if (m) d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    return d;
+  }
+  const parsed = Date.parse(`${ts} ${now.getFullYear()}`);
+  if (!Number.isNaN(parsed)) return new Date(parsed);
+  return null;
+}
+
+function roleMatchesFilter(logRole, filterId) {
+  if (filterId === 'all') return true;
+  const r = String(logRole || '');
+  if (filterId === 'facility_admin') return r === 'facility_admin' || r === 'hospital_admin';
+  return r === filterId;
+}
+
+export function LogsScreen({ user: _user }) {
+  const { C } = useTheme();
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modFilter, setModFilter] = useState('All');
+  const [dateFilter, setDateFilter] = useState('All time');
+  const [staffFilter, setStaffFilter] = useState('All');
+  const [roleFilter, setRoleFilter] = useState('all');
+
+  const staffNames = ['All', ...new Set(logs.map(s => s.staff).filter(Boolean))];
 
   const load = useCallback(async () => {
     try {
@@ -53,12 +119,33 @@ export function LogsScreen({ user }) {
   useEffect(() => { load(); }, [load]);
 
   const filtered = logs.filter(log => {
-    const modOk    = modFilter   === 'All' || log.module === modFilter;
-    const staffOk  = staffFilter === 'All' || log.staff  === staffFilter;
-    const dateOk   = dateFilter  === 'All time'
-      || (dateFilter === 'Today'     && log.ts.startsWith('Today'))
-      || (dateFilter === 'Yesterday' && log.ts.startsWith('Yesterday'));
-    return modOk && staffOk && dateOk;
+    const modOk = modFilter === 'All' || log.module === modFilter;
+    const staffOk = staffFilter === 'All' || log.staff === staffFilter;
+    const roleOk = roleMatchesFilter(log.role, roleFilter);
+
+    const now = new Date();
+    const od = logOccurredAt(log);
+    let dateOk = dateFilter === 'All time';
+    if (!dateOk && dateFilter === 'Today') {
+      dateOk = (od && startOfLocalDay(od).getTime() === startOfLocalDay(now).getTime()) || String(log.ts || '').startsWith('Today');
+    } else if (!dateOk && dateFilter === 'Yesterday') {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      dateOk =
+        (od && startOfLocalDay(od).getTime() === startOfLocalDay(y).getTime()) ||
+        String(log.ts || '').startsWith('Yesterday');
+    } else if (!dateOk && dateFilter === 'This week') {
+      if (od) {
+        const t = od.getTime();
+        dateOk = t >= mondayOfWeekContaining(now).getTime() && t <= sundayEndOfWeekContaining(now).getTime();
+      }
+    } else if (!dateOk && dateFilter === 'This month') {
+      if (od) {
+        dateOk = od.getFullYear() === now.getFullYear() && od.getMonth() === now.getMonth();
+      }
+    }
+
+    return modOk && staffOk && dateOk && roleOk;
   });
 
   return (
@@ -73,7 +160,6 @@ export function LogsScreen({ user }) {
         </TouchableOpacity>
       </View>
 
-      {/* Module filter */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
         {MODULES.map(m => (
           <TouchableOpacity key={m} onPress={() => setModFilter(m)}
@@ -83,7 +169,6 @@ export function LogsScreen({ user }) {
         ))}
       </ScrollView>
 
-      {/* Date filter */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
         {DATE_FILTERS.map(d => (
           <TouchableOpacity key={d} onPress={() => setDateFilter(d)}
@@ -93,7 +178,25 @@ export function LogsScreen({ user }) {
         ))}
       </ScrollView>
 
-      {/* Staff filter */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+        {ROLE_FILTER_IDS.map((r) => (
+          <TouchableOpacity
+            key={r.id}
+            onPress={() => setRoleFilter(r.id)}
+            style={[
+              s.pill,
+              {
+                backgroundColor: roleFilter === r.id ? C.textSec : C.surface,
+                borderColor: roleFilter === r.id ? C.textSec : C.border,
+                marginRight: 6,
+              },
+            ]}
+          >
+            <Text style={{ color: roleFilter === r.id ? '#fff' : C.textSec, fontWeight: '600', fontSize: 11 }}>{r.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
         {staffNames.map(n => (
           <TouchableOpacity key={n} onPress={() => setStaffFilter(n)}

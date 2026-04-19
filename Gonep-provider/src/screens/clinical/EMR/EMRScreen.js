@@ -3,7 +3,7 @@
 // as a full new screen (managed via local state — no router needed).
 // Role-gated: doctors see own patients only; admin sees all.
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
 } from 'react-native';
@@ -12,7 +12,7 @@ import { Card } from '../../../atoms/Card';
 import { Icon } from '../../../atoms/Icon';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
 import { isOwnDataOnly } from '../../../config/roles';
-import { MOCK_PATIENTS } from '../../../mock/data';
+import { getPatients } from '../../../api';
 import { PatientDetailScreen } from './PatientDetailScreen';
 
 // Role descriptions shown on the EMR list
@@ -28,15 +28,37 @@ export function EMRScreen({ user }) {
   const { C } = useTheme();
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [search, setSearch] = useState('');
+  const [patientsData, setPatientsData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const ownOnly  = isOwnDataOnly(user?.role);
-  const patients = MOCK_PATIENTS.filter(p => {
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError('');
+    getPatients()
+      .then((rows) => {
+        if (mounted) setPatientsData(rows || []);
+      })
+      .catch((err) => {
+        if (mounted) setError(err?.message || 'Unable to load patient records.');
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const patients = useMemo(() => patientsData.filter(p => {
     const matchRole = ownOnly ? p.doctor_id === user?.id : true;
     const matchSearch = !search.trim() ||
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      String(p.name || '').toLowerCase().includes(search.toLowerCase()) ||
       (p.conditions || []).some(c => c.toLowerCase().includes(search.toLowerCase()));
     return matchRole && matchSearch;
-  });
+  }), [patientsData, ownOnly, search, user?.id]);
 
   // ── Patient detail screen ─────────────────────────────────────────────────
   if (selectedPatient) {
@@ -77,7 +99,14 @@ export function EMRScreen({ user }) {
         ) : null}
       </View>
 
-      {patients.length === 0 && (
+      {loading && (
+        <Text style={{ color: C.textMuted, marginBottom: 12 }}>Loading patient records...</Text>
+      )}
+      {!!error && (
+        <Text style={{ color: C.danger, marginBottom: 12 }}>{error}</Text>
+      )}
+
+      {!loading && !error && patients.length === 0 && (
         <View style={styles.empty}>
           <Icon name="users" lib="feather" size={36} color={C.textMuted} />
           <Text style={{ color: C.textMuted, fontSize: 13, marginTop: 10 }}>No patients found</Text>

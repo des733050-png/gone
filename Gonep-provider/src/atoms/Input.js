@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useResponsive } from '../theme/responsive';
 import { Icon } from './Icon';
@@ -15,6 +15,9 @@ export function Input({
   icon,
   hint,
   style,
+  onToggleSecure,
+  isSecureVisible = false,
+  ...textInputProps
 }) {
   const { C } = useTheme();
   const { width } = useResponsive();
@@ -49,6 +52,7 @@ export function Input({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholderTextColor={C.textMuted}
+          {...textInputProps}
           style={[
             styles.input,
             {
@@ -56,11 +60,26 @@ export function Input({
               backgroundColor: C.inputBg,
               color: C.text,
               paddingLeft: icon ? 38 : 14,
+              paddingRight: onToggleSecure ? 44 : 14,
               fontSize: Math.round(15 * scale),
               paddingVertical: Math.round(12 * scale),
             },
           ]}
         />
+        {onToggleSecure ? (
+          <TouchableOpacity
+            onPress={onToggleSecure}
+            style={styles.secureToggle}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Icon
+              name={isSecureVisible ? 'eye-off' : 'eye'}
+              lib="feather"
+              size={18}
+              color={focused ? C.primary : C.textMuted}
+            />
+          </TouchableOpacity>
+        ) : null}
       </View>
       {error ? (
         <View style={styles.errorRow}>
@@ -96,6 +115,11 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: 10,
     paddingRight: 14,
+  },
+  secureToggle: {
+    position: 'absolute',
+    right: 12,
+    zIndex: 1,
   },
   error: {
     marginTop: 2,

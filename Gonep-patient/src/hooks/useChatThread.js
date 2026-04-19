@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { getChatThread } from '../api';
 
-export function useChatThread() {
+export function useChatThread(enabled = true) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setMessages([]);
+      setLoading(false);
+      setError(null);
+      return undefined;
+    }
     let mounted = true;
 
     const load = async () => {
@@ -26,7 +32,7 @@ export function useChatThread() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [enabled]);
 
   return { messages, loading, error };
 }

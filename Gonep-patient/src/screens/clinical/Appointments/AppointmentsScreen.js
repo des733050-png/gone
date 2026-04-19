@@ -5,22 +5,101 @@ import { Card } from '../../../atoms/Card';
 import { Badge } from '../../../atoms/Badge';
 import { Btn } from '../../../atoms/Btn';
 import { Icon } from '../../../atoms/Icon';
-import { useAppointments } from '../../../hooks/useAppointments';
+import { SectionLoader } from '../../../atoms/SectionLoader';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
+import { getAppointmentStatusMeta } from '../../../utils/appointmentAlerts';
+import { useMemo, useState } from 'react';
 
-export function AppointmentsScreen({ onOpenDetails }) {
+export function AppointmentsScreen({ appointments = [], loading = false, onOpenDetails }) {
   const { C } = useTheme();
-  const { appointments } = useAppointments();
+  const [activeFilter, setActiveFilter] = useState('upcoming');
+
+  const filteredAppointments = useMemo(() => {
+    const now = new Date();
+    const parseSchedule = (item) => {
+      if (!item?.scheduled_for) return null;
+      const dt = new Date(item.scheduled_for);
+      return Number.isNaN(dt.getTime()) ? null : dt;
+    };
+    return (appointments || []).filter((item) => {
+      const schedule = parseSchedule(item);
+      if (activeFilter === 'in_progress') return item.status === 'in_progress';
+      if (activeFilter === 'pending') return item.status === 'pending';
+      if (activeFilter === 'past') {
+        if (item.status === 'completed') return true;
+        return schedule ? schedule < now && item.status !== 'in_progress' : false;
+      }
+      if (activeFilter === 'cancelled') return item.status === 'cancelled';
+      // Default: upcoming
+      if (item.status !== 'confirmed') return false;
+      return schedule ? schedule >= now : true;
+    });
+  }, [appointments, activeFilter]);
+
+  const emptyByFilter = {
+    upcoming: 'No upcoming appointments.',
+    in_progress: 'No appointments in progress.',
+    pending: 'No appointments pending confirmation.',
+    past: 'No past appointments yet.',
+    cancelled: 'No cancelled appointments.',
+  };
 
   return (
     <ScreenContainer scroll contentContainerStyle={{ paddingBottom: 24 }}>
       <View style={styles.filtersRow}>
-        <Btn label="Upcoming" variant="primary" size="sm" />
-        <Btn label="Past" variant="ghost" size="sm" style={styles.filterBtn} />
-        <Btn label="Cancelled" variant="ghost" size="sm" style={styles.filterBtn} />
+        <Btn
+          label="Upcoming"
+          variant={activeFilter === 'upcoming' ? 'primary' : 'ghost'}
+          size="sm"
+          onPress={() => setActiveFilter('upcoming')}
+        />
+        <Btn
+          label="In Progress"
+          variant={activeFilter === 'in_progress' ? 'primary' : 'ghost'}
+          size="sm"
+          style={styles.filterBtn}
+          onPress={() => setActiveFilter('in_progress')}
+        />
+        <Btn
+          label="Pending"
+          variant={activeFilter === 'pending' ? 'primary' : 'ghost'}
+          size="sm"
+          style={styles.filterBtn}
+          onPress={() => setActiveFilter('pending')}
+        />
+        <Btn
+          label="Past"
+          variant={activeFilter === 'past' ? 'primary' : 'ghost'}
+          size="sm"
+          style={styles.filterBtn}
+          onPress={() => setActiveFilter('past')}
+        />
+        <Btn
+          label="Cancelled"
+          variant={activeFilter === 'cancelled' ? 'primary' : 'ghost'}
+          size="sm"
+          style={styles.filterBtn}
+          onPress={() => setActiveFilter('cancelled')}
+        />
       </View>
+      <Text style={{ color: C.textMuted, fontSize: 12, marginBottom: 8 }}>
+        Showing {filteredAppointments.length} appointment{filteredAppointments.length === 1 ? '' : 's'}.
+      </Text>
 
-      {appointments.map((a) => (
+      {loading ? <SectionLoader label="Loading appointments..." /> : null}
+      {!loading && filteredAppointments.length === 0 ? (
+        <Card>
+          <Text style={{ color: C.text, fontWeight: '700', marginBottom: 4 }}>
+            {emptyByFilter[activeFilter]}
+          </Text>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>
+            Change the filter to view other appointment groups.
+          </Text>
+        </Card>
+      ) : null}
+      {filteredAppointments.map((a) => {
+        const statusMeta = getAppointmentStatusMeta(a.status);
+        return (
         <Card key={a.id} hover style={styles.card}>
           <View style={styles.row}>
             <View style={styles.left}>
@@ -39,8 +118,8 @@ export function AppointmentsScreen({ onOpenDetails }) {
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Badge
-                label={a.status}
-                color={a.status === 'confirmed' ? 'success' : 'warning'}
+                label={statusMeta.label}
+                color={statusMeta.color}
               />
               <Text style={[styles.fee, { color: C.text }]}>{a.fee}</Text>
               <Text style={{ color: C.textMuted, fontSize: 11 }}>{a.facility}</Text>
@@ -53,16 +132,19 @@ export function AppointmentsScreen({ onOpenDetails }) {
               size="sm"
               onPress={() => onOpenDetails && onOpenDetails(a.id)}
             />
-            <Btn
-              label="Reschedule"
-              variant="secondary"
-              size="sm"
-              style={styles.actionBtn}
-              onPress={() => onOpenDetails && onOpenDetails(a.id)}
-            />
+            {a.can_reschedule ? (
+              <Btn
+                label="Reschedule"
+                variant="secondary"
+                size="sm"
+                style={styles.actionBtn}
+                onPress={() => onOpenDetails && onOpenDetails(a.id)}
+              />
+            ) : null}
           </View>
         </Card>
-      ))}
+        );
+      })}
     </ScreenContainer>
   );
 }
@@ -70,10 +152,12 @@ export function AppointmentsScreen({ onOpenDetails }) {
 const styles = StyleSheet.create({
   filtersRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     marginBottom: 12,
   },
   filterBtn: {
     marginLeft: 8,
+    marginBottom: 8,
   },
   card: {
     marginBottom: 10,
