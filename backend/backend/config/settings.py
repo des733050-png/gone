@@ -29,7 +29,7 @@ def _split_env_list(name, default=""):
 
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() in {"1", "true", "yes", "on"}
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in {"1", "true", "yes", "on"}
 
 ALLOWED_HOSTS = _split_env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
 CSRF_TRUSTED_ORIGINS = _split_env_list(
@@ -37,7 +37,7 @@ CSRF_TRUSTED_ORIGINS = _split_env_list(
     (
         "http://127.0.0.1,"
         "http://localhost,"
-        "https://gone-qhfv-ngtizhbvs-des733050-pngs-projects.vercel.app",
+        ".vercel.app",
         "http://127.0.0.1:8081,http://localhost:8081,"
         "http://127.0.0.1:8082,http://localhost:8082,"
         "http://127.0.0.1:8083,http://localhost:8083"
@@ -47,7 +47,7 @@ CORS_ALLOWED_ORIGINS = _split_env_list(
     "DJANGO_CORS_ALLOWED_ORIGINS",
     (
         "http://127.0.0.1:8081,http://localhost:8081,"
-        "https://gone-qhfv-ngtizhbvs-des733050-pngs-projects.vercel.app,"
+        ".vercel.app"
         "http://127.0.0.1:8082,http://localhost:8082,"
         "http://127.0.0.1:8083,http://localhost:8083"
     ),
