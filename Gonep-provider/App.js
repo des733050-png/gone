@@ -9,9 +9,9 @@ import { APP_CONFIG } from './src/config/env';
 import { PAGE_PATHS } from './src/seo/meta';
 import { getCurrentUser, logoutProvider } from './src/api';
 import { normalizeRole } from './src/config/roles';
-import { AuthScreen }                from './src/screens/auth/Auth';
+import { AuthScreen }                from './src/screens/Auth/Authentication';
 import { MainShell }                 from './src/screens/MainShell';
-import { HospitalOnboardingScreen }  from './src/screens/auth/Onboarding';
+import { HospitalOnboardingScreen }  from './src/screens/Auth/Onboarding';
 
 const Stack = createNativeStackNavigator();
 
