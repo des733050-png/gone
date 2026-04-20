@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, StatusBar, StyleSheet, Platform, TouchableOpacity, Text } from 'react-native';
+import { View, StatusBar, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { SeoProvider } from './src/seo/SeoProvider';
 import { APP_CONFIG } from './src/config/env';
-import { PAGE_PATHS } from './src/seo/meta';
 import { getCurrentUser, logoutProvider } from './src/api';
 import { normalizeRole } from './src/config/roles';
 import { AuthScreen }                from './src/screens/Auth/Authentication';
@@ -16,7 +15,7 @@ import { HospitalOnboardingScreen }  from './src/screens/Auth/Onboarding';
 const Stack = createNativeStackNavigator();
 
 function RootNavigator() {
-  const { isDark, C } = useTheme();
+  const { isDark } = useTheme();
   const [user, setUser] = useState(null);
   // showOnboarding: true = new hospital registering (no existing account)
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -39,26 +38,6 @@ function RootNavigator() {
     };
   }, []);
 
-
-  // React Navigation linking config — gives each page a clean URL on web.
-  // On iOS/Android this is a no-op (in-app navigation only).
-  // Native deep-link support can be added later via app.json scheme config.
-  const linking = React.useMemo(() => ({
-    prefixes: [],
-    config: {
-      screens: {
-        // Keep auth route unique so it doesn't conflict with Main's root pattern.
-        Auth: 'login',
-        Main: {
-          path: '',
-          screens: Object.fromEntries(
-            Object.entries(PAGE_PATHS).map(([id, path]) => [id, path.slice(1)])
-          ),
-        },
-      },
-    },
-  }), []);
-
   const navTheme = useMemo(
     () => ({
       ...(isDark ? DarkTheme : DefaultTheme),
@@ -78,7 +57,7 @@ function RootNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme} linking={linking} documentTitle={{ enabled: false }}>
+    <NavigationContainer theme={navTheme} documentTitle={{ enabled: false }}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
           <Stack.Screen name="Auth">
