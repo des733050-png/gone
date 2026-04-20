@@ -14,6 +14,7 @@
     "web:dev": "cross-env NODE_ENV=development expo start --web",
     "web:staging": "cross-env NODE_ENV=staging expo start --web",
     "web:prod": "cross-env NODE_ENV=production expo start --web",
+    "build": "expo export --platform web",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },
