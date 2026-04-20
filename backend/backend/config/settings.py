@@ -37,7 +37,7 @@ CSRF_TRUSTED_ORIGINS = _split_env_list(
     (
         "http://127.0.0.1,"
         "http://localhost,"
-        ".vercel.app",
+       "https://*.vercel.app,"
         "http://127.0.0.1:8081,http://localhost:8081,"
         "http://127.0.0.1:8082,http://localhost:8082,"
         "http://127.0.0.1:8083,http://localhost:8083"
@@ -47,7 +47,7 @@ CORS_ALLOWED_ORIGINS = _split_env_list(
     "DJANGO_CORS_ALLOWED_ORIGINS",
     (
         "http://127.0.0.1:8081,http://localhost:8081,"
-        ".vercel.app"
+       "https://*.vercel.app,"
         "http://127.0.0.1:8082,http://localhost:8082,"
         "http://127.0.0.1:8083,http://localhost:8083"
     ),
