@@ -1,0 +1,1 @@
+export { SpecializationsScreen } from './SpecializationsScreen';

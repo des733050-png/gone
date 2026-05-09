@@ -2,16 +2,20 @@
 
 export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+// Slot types must match patient/provider booking types (In Facility / Home
+// Visit / Virtual). The previous "chat" option is renamed to "virtual" so
+// the availability calendar lines up with the booking flow.
 export const SLOT_TYPES = [
-  { value: 'in_facility', label: 'In-facility' },
-  { value: 'home_visit',  label: 'Home visit'  },
-  { value: 'chat',        label: 'Chat / text' },
+  { value: 'in_facility', label: 'In Facility' },
+  { value: 'home_visit',  label: 'Home Visit'  },
+  { value: 'virtual',     label: 'Virtual'     },
 ];
 
 export const slotTypeColor = (type, C) => {
   if (type === 'in_facility') return { bg: C.primaryLight, text: C.primary };
   if (type === 'home_visit')  return { bg: C.successLight, text: C.success };
-  if (type === 'chat')        return { bg: C.purpleLight,  text: C.purple  };
+  if (type === 'virtual' || type === 'chat')
+    return { bg: C.purpleLight, text: C.purple };
   return { bg: C.primaryLight, text: C.primary };
 };
 

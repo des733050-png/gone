@@ -1,5 +1,23 @@
 import { API_CONFIG } from '../../config/env';
-import { buildCookieHeader, getStore, isNative, parseCookies } from './sessionStore';
+import { buildCookieHeader, clearStore, getStore, isNative, parseCookies } from './sessionStore';
+
+// ── Session-invalid signal ────────────────────────────────────────────────────
+// When the server returns 401/403 for an authenticated request, the session
+// cookie / CSRF / token is no longer valid. We clear local auth state and
+// dispatch a custom event so the app shell can redirect to the login screen.
+function signalSessionInvalid(reason) {
+  try {
+    clearStore();
+  } catch (_) {}
+  if (typeof globalThis !== 'undefined' && typeof globalThis.dispatchEvent === 'function') {
+    try {
+      const evt = (typeof CustomEvent !== 'undefined')
+        ? new CustomEvent('gonep:session-invalid', { detail: { reason } })
+        : { type: 'gonep:session-invalid', detail: { reason } };
+      globalThis.dispatchEvent(evt);
+    } catch (_) {}
+  }
+}
 
 export function normalizeWebLoopbackUrl(url) {
   if (isNative()) return url;
@@ -67,11 +85,20 @@ export function createRequestClient(csrfManager, { tokenMode = false } = {}) {
         requestHeaders['X-CSRFToken'] = csrfManager.getWebCsrfToken();
       }
 
+      // Always disable HTTP caching for API calls — list/detail GETs change
+      // frequently and stale browser-cache responses cause "refresh shows
+      // old data" bugs.
+      if (method === 'GET' && !requestHeaders['Cache-Control']) {
+        requestHeaders['Cache-Control'] = 'no-cache';
+        requestHeaders['Pragma'] = 'no-cache';
+      }
+
       const response = await fetch(normalizeWebLoopbackUrl(url), {
         ...options,
         method,
         signal: controller.signal,
         credentials,
+        cache: options.cache || 'no-store',
         headers: requestHeaders,
       });
 
@@ -80,7 +107,17 @@ export function createRequestClient(csrfManager, { tokenMode = false } = {}) {
         if (raw) parseCookies(raw);
       }
 
-      if (!response.ok) throw new Error(await extractErrorMessage(response));
+      if (!response.ok) {
+        // 401/403 indicates a session/cookie/CSRF mismatch — force-logout so
+        // the user can re-authenticate cleanly. Skip for the auth endpoints
+        // themselves (login/csrf) — those legitimately return 401 on bad
+        // credentials and shouldn't blow the session away.
+        if ((response.status === 401 || response.status === 403)
+            && !/\/auth\/(login|csrf|session|register|forgot-password)/.test(url)) {
+          signalSessionInvalid(`HTTP ${response.status} on ${method} ${url}`);
+        }
+        throw new Error(await extractErrorMessage(response));
+      }
       if (response.status === 204) return null;
       return response.json();
     } catch (err) {

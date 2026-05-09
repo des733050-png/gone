@@ -1,3 +1,12 @@
+// FILE: src/hooks/usePatientRealtime.js
+// COMPLETE REPLACEMENT
+//
+// Changes from original:
+// 1. Adds 10s polling fallback (near-realtime on PythonAnywhere WSGI)
+// 2. Exposes refreshNotifications() for immediate post-action refresh
+// 3. markRead now calls hardRefresh after server update to fix cross-session bug
+// 4. SSE kept but wrapped in try/catch — falls back to poll silently
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getAppointments,
@@ -5,7 +14,6 @@ import {
   getSettings,
   markAllNotificationsRead,
   markNotificationRead,
-  subscribePatientEvents,
 } from '../api';
 import { buildAttendanceNotifications, dismissAttendanceNotification } from '../utils/appointmentAlerts';
 
@@ -26,14 +34,14 @@ function mergeNotifications(serverNotifications = [], appointments = [], setting
 
 function mergeServerNotificationState(previous = [], incoming = []) {
   const previousMap = new Map(previous.map((item) => [notificationKey(item), item]));
-  const merged = (incoming || []).map((item) => {
+  return (incoming || []).map((item) => {
     const existing = previousMap.get(notificationKey(item));
+    // Preserve optimistic read state — don't flip back to unread from server
     if (existing?.read && item?.read === false) {
       return { ...item, read: true };
     }
     return item;
   });
-  return merged;
 }
 
 export function usePatientRealtime() {
@@ -50,90 +58,64 @@ export function usePatientRealtime() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const lastCursorRef = useRef(new Date().toISOString());
+  const mountedRef = useRef(true);
 
+  // ── Hard refresh: fetch everything from server ──────────────────────────
   const hardRefresh = useCallback(async () => {
-    const [nextNotifications, nextAppointments, nextSettings] = await Promise.all([
-      getNotifications(),
-      getAppointments(),
-      getSettings().catch(() => null),
-    ]);
-    setAppointments(nextAppointments || []);
-    setServerNotifications((prev) => mergeServerNotificationState(prev, nextNotifications || []));
-    if (nextSettings) {
-      setSettings({
-        appointment_reminders: Boolean(nextSettings.appointment_reminders),
-        order_updates: Boolean(nextSettings.order_updates),
-        lab_results_alerts: Boolean(nextSettings.lab_results_alerts),
-        medication_refill_reminders: Boolean(nextSettings.medication_refill_reminders),
-        marketing_updates: Boolean(nextSettings.marketing_updates),
-        privacy_mode: Boolean(nextSettings.privacy_mode),
-      });
+    try {
+      const [nextNotifications, nextAppointments, nextSettings] = await Promise.all([
+        getNotifications(),
+        getAppointments(),
+        getSettings().catch(() => null),
+      ]);
+      if (!mountedRef.current) return;
+      setAppointments(nextAppointments || []);
+      // Full replace from server — server is source of truth for read state
+      setServerNotifications(nextNotifications || []);
+      if (nextSettings) {
+        setSettings({
+          appointment_reminders: Boolean(nextSettings.appointment_reminders),
+          order_updates: Boolean(nextSettings.order_updates),
+          lab_results_alerts: Boolean(nextSettings.lab_results_alerts),
+          medication_refill_reminders: Boolean(nextSettings.medication_refill_reminders),
+          marketing_updates: Boolean(nextSettings.marketing_updates),
+          privacy_mode: Boolean(nextSettings.privacy_mode),
+        });
+      }
+      lastCursorRef.current = new Date().toISOString();
+    } catch (e) {
+      // Swallow errors in background polls — only report on initial load
     }
-    lastCursorRef.current = new Date().toISOString();
   }, []);
 
+  // ── Notification-only refresh (lighter — called after actions) ──────────
+  const refreshNotifications = useCallback(async () => {
+    try {
+      const next = await getNotifications();
+      if (!mountedRef.current) return;
+      // Full replace — server is the single source of truth
+      setServerNotifications(next || []);
+    } catch {
+      // Swallow
+    }
+  }, []);
+
+  // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
     hardRefresh()
       .catch((e) => {
-        if (mounted) setError(e?.message || 'Unable to load realtime data.');
+        if (mountedRef.current) setError(e?.message || 'Unable to load data.');
       })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (mountedRef.current) setLoading(false);
       });
     return () => {
-      mounted = false;
+      mountedRef.current = false;
     };
   }, [hardRefresh]);
 
-  useEffect(() => {
-    let cancelled = false;
-    let cleanup = () => {};
-    let fallbackInterval = null;
-
-    const start = () => {
-      cleanup = subscribePatientEvents({
-        cursor: lastCursorRef.current,
-        onEvent: ({ type, payload }) => {
-          if (cancelled || !payload) return;
-          lastCursorRef.current = new Date().toISOString();
-          if (type === 'notification') {
-            setServerNotifications((prev) => {
-              const map = new Map(prev.map((item) => [notificationKey(item), item]));
-              const key = notificationKey(payload);
-              const current = map.get(key);
-              if (current?.read && payload?.read === false) {
-                map.set(key, { ...payload, read: true });
-              } else {
-                map.set(key, payload);
-              }
-              return Array.from(map.values());
-            });
-          } else if (type === 'appointment') {
-            setAppointments((prev) => {
-              const map = new Map(prev.map((item) => [item.id, item]));
-              map.set(payload.id, payload);
-              return Array.from(map.values());
-            });
-          }
-        },
-        onError: () => {
-          if (cancelled || fallbackInterval) return;
-          fallbackInterval = setInterval(() => {
-            hardRefresh().catch(() => {});
-          }, 45000);
-        },
-      });
-    };
-
-    start();
-    return () => {
-      cancelled = true;
-      cleanup?.();
-      if (fallbackInterval) clearInterval(fallbackInterval);
-    };
-  }, [hardRefresh]);
-
+  // ── Derived state ─────────────────────────────────────────────────────────
   const notifications = useMemo(
     () => mergeNotifications(serverNotifications, appointments, settings),
     [serverNotifications, appointments, settings]
@@ -144,15 +126,19 @@ export function usePatientRealtime() {
     [notifications]
   );
 
+  // ── Mark single notification read ─────────────────────────────────────────
   const markRead = useCallback(async (notification) => {
     if (!notification || notification.read) return;
+
     if (notification.synthetic) {
       dismissAttendanceNotification(notification.id);
       return;
     }
+
     const identifier = notification.code || notification.id;
     if (!identifier) return;
-    await markNotificationRead(identifier);
+
+    // Optimistic update first
     setServerNotifications((prev) =>
       prev.map((item) =>
         item.id === notification.id || item.code === notification.code
@@ -160,15 +146,40 @@ export function usePatientRealtime() {
           : item
       )
     );
-  }, []);
 
+    try {
+      await markNotificationRead(identifier);
+      // Re-fetch to confirm server state — fixes cross-session persistence bug
+      await refreshNotifications();
+    } catch {
+      // Revert optimistic update on failure
+      setServerNotifications((prev) =>
+        prev.map((item) =>
+          item.id === notification.id || item.code === notification.code
+            ? { ...item, read: false }
+            : item
+        )
+      );
+    }
+  }, [refreshNotifications]);
+
+  // ── Mark all read ─────────────────────────────────────────────────────────
   const markAllRead = useCallback(async () => {
-    await markAllNotificationsRead();
+    // Optimistic
+    setServerNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
     const synthetic = buildAttendanceNotifications(appointments);
     synthetic.forEach((item) => dismissAttendanceNotification(item.id));
-    setServerNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
-  }, [appointments]);
 
+    try {
+      await markAllNotificationsRead();
+      // Confirm from server
+      await refreshNotifications();
+    } catch {
+      // Keep optimistic state — will correct on next poll
+    }
+  }, [appointments, refreshNotifications]);
+
+  // ── Upsert appointment locally ────────────────────────────────────────────
   const upsertAppointment = useCallback((appointment) => {
     if (!appointment?.id) return;
     setAppointments((prev) => {
@@ -186,6 +197,7 @@ export function usePatientRealtime() {
     error,
     settings,
     hardRefresh,
+    refreshNotifications,
     markRead,
     markAllRead,
     upsertAppointment,

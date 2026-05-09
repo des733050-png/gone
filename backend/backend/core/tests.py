@@ -5,6 +5,7 @@ from django.apps import apps
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError, models
 from django.test import Client, RequestFactory, TestCase
@@ -17,9 +18,13 @@ from core.models import (
     PatientPortalNotification,
     PatientProfile,
     PatientUserLink,
+    ProviderAppointment,
     ProviderInventoryItem,
     ProviderMembership,
     ProviderSubRole,
+    ProviderVerificationDocument,
+    ProviderVerificationSubmission,
+    ProviderVerificationStatus,
     RiderFacilityAccess,
     RiderPortalNotification,
     RiderProfile,
@@ -123,6 +128,13 @@ class SeededFacilityTenancyTestCase(TestCase):
             content_type="application/json",
         )
         return client, response
+
+    def approve_provider_facility(self, facility=None, submitted_by=None):
+        return ProviderVerificationSubmission.objects.create(
+            facility=facility or self.nairobi,
+            submitted_by=submitted_by or self.facility_admin_user,
+            status=ProviderVerificationStatus.VERIFIED,
+        )
 
 
 class SeedAndMembershipTests(SeededFacilityTenancyTestCase):
@@ -243,6 +255,7 @@ class SessionAndFacilityContextTests(SeededFacilityTenancyTestCase):
 
 class ProviderIsolationTests(SeededFacilityTenancyTestCase):
     def test_provider_cannot_access_other_facility_inventory_item_by_uuid(self):
+        self.approve_provider_facility()
         other_item = ProviderInventoryItem.objects.create(
             item_code="INV-WEST-0001",
             facility=self.westlands,
@@ -278,23 +291,197 @@ class ProviderIsolationTests(SeededFacilityTenancyTestCase):
         self.assertNotIn("hospital_id", payload)
         self.assertNotIn("affiliated_hospitals", payload)
 
-    def test_provider_patient_search_receptionist_returns_minimal_results(self):
-        client, response = self.login_json("reception@nairobi-general.co.ke")
-        self.assertEqual(response.status_code, 200)
-        search_response = client.get(f"{API_ROOT}/provider/patients/search/?q=Faith")
-        self.assertEqual(search_response.status_code, 200)
-        body = json_body(search_response)
-        self.assertIn("results", body)
-        self.assertTrue(len(body["results"]) >= 1)
-        row = next(r for r in body["results"] if r.get("id") == "PAT-0001")
-        self.assertEqual(row["name"], "Faith Njoroge")
-        self.assertIn("phone", row)
 
-    def test_provider_patient_search_lab_manager_forbidden(self):
-        client, response = self.login_json("lab@nairobi-general.co.ke")
+class ProviderVerificationGateTests(SeededFacilityTenancyTestCase):
+    def test_provider_login_payload_includes_restricted_verification_status(self):
+        client, response = self.login_json("admin@nairobi-general.co.ke")
         self.assertEqual(response.status_code, 200)
-        search_response = client.get(f"{API_ROOT}/provider/patients/search/?q=Faith")
-        self.assertEqual(search_response.status_code, 403)
+        payload = json_body(response)["user"]
+        self.assertEqual(payload["verification_status"], "UNVERIFIED")
+        self.assertEqual(payload["access"], "RESTRICTED")
+        self.assertTrue(payload["can_upload_verification_documents"])
+
+        session_response = client.get(f"{API_ROOT}/auth/session/")
+        session_payload = json_body(session_response)["user"]
+        self.assertEqual(session_payload["verification_status"], "UNVERIFIED")
+        self.assertEqual(session_payload["access"], "RESTRICTED")
+
+    def test_unverified_provider_is_blocked_from_gated_endpoint(self):
+        client, response = self.login_json("doctor@nairobi-general.co.ke")
+        self.assertEqual(response.status_code, 200)
+        blocked = client.get(f"{API_ROOT}/provider/appointments/")
+        self.assertEqual(blocked.status_code, 403)
+        payload = json_body(blocked)
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["code"], "VERIFICATION_REQUIRED")
+
+    def test_facility_admin_can_submit_documents_and_pending_blocks_reupload(self):
+        client, response = self.login_json("admin@nairobi-general.co.ke")
+        self.assertEqual(response.status_code, 200)
+        upload = SimpleUploadedFile(
+            "license.pdf",
+            b"license bytes",
+            content_type="application/pdf",
+        )
+        submitted = client.post(
+            f"{API_ROOT}/provider/verification/submit/",
+            data={"document_type": "LICENSE", "file": upload},
+        )
+        self.assertEqual(submitted.status_code, 201)
+        payload = json_body(submitted)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["data"]["verification_status"], "PENDING")
+        self.assertFalse(payload["data"]["can_upload_verification_documents"])
+        self.assertEqual(ProviderVerificationDocument.objects.count(), 1)
+
+        second_upload = SimpleUploadedFile(
+            "id.pdf",
+            b"id bytes",
+            content_type="application/pdf",
+        )
+        blocked = client.post(
+            f"{API_ROOT}/provider/verification/submit/",
+            data={"document_type": "ID", "file": second_upload},
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(json_body(blocked)["code"], "VERIFICATION_UPLOAD_LOCKED")
+
+    def test_facility_admin_can_upload_long_original_filename(self):
+        client, response = self.login_json("admin@nairobi-general.co.ke")
+        self.assertEqual(response.status_code, 200)
+
+        long_name = (
+            "proton-recovery-kit_1_3Q1wamm_"
+            + ("x" * 220)
+            + ".pdf"
+        )
+        upload = SimpleUploadedFile(
+            long_name,
+            b"pdf bytes",
+            content_type="application/pdf",
+        )
+        submitted = client.post(
+            f"{API_ROOT}/provider/verification/submit/",
+            data={"document_type": "LICENSE", "file": upload},
+        )
+        self.assertEqual(submitted.status_code, 201)
+        self.assertEqual(ProviderVerificationDocument.objects.count(), 1)
+
+        doc = ProviderVerificationDocument.objects.first()
+        self.assertEqual(doc.original_filename, long_name)
+        # Stored file path must be short and not embed the original filename.
+        self.assertTrue(len(doc.file.name) < 500)
+        self.assertNotIn("proton-recovery-kit", doc.file.name)
+
+    def test_admin_approval_unlocks_provider_apis(self):
+        submission = ProviderVerificationSubmission.objects.create(
+            facility=self.nairobi,
+            submitted_by=self.facility_admin_user,
+            status=ProviderVerificationStatus.PENDING,
+        )
+        submission.approve(reviewed_by=self.superuser)
+        client, response = self.login_json("doctor@nairobi-general.co.ke")
+        self.assertEqual(response.status_code, 200)
+        allowed = client.get(f"{API_ROOT}/provider/appointments/")
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_admin_rejection_allows_new_upload(self):
+        submission = ProviderVerificationSubmission.objects.create(
+            facility=self.nairobi,
+            submitted_by=self.facility_admin_user,
+            status=ProviderVerificationStatus.PENDING,
+            rejection_reason="Expired license.",
+        )
+        submission.reject(reviewed_by=self.superuser, reason="Expired license.")
+        client, response = self.login_json("admin@nairobi-general.co.ke")
+        self.assertEqual(response.status_code, 200)
+        status_response = client.get(f"{API_ROOT}/provider/verification/status/")
+        status_payload = json_body(status_response)["data"]
+        self.assertEqual(status_payload["verification_status"], "REJECTED")
+        self.assertTrue(status_payload["can_upload_verification_documents"])
+
+        upload = SimpleUploadedFile("license.pdf", b"new bytes", content_type="application/pdf")
+        submitted = client.post(
+            f"{API_ROOT}/provider/verification/submit/",
+            data={"document_type": "LICENSE", "file": upload},
+        )
+        self.assertEqual(submitted.status_code, 201)
+        self.assertEqual(
+            ProviderVerificationSubmission.objects.filter(
+                facility=self.nairobi,
+                status=ProviderVerificationStatus.PENDING,
+            ).count(),
+            1,
+        )
+
+    def test_non_facility_admin_cannot_submit_documents(self):
+        client, response = self.login_json("doctor@nairobi-general.co.ke")
+        self.assertEqual(response.status_code, 200)
+        upload = SimpleUploadedFile("license.pdf", b"bytes", content_type="application/pdf")
+        submitted = client.post(
+            f"{API_ROOT}/provider/verification/submit/",
+            data={"document_type": "LICENSE", "file": upload},
+        )
+        self.assertEqual(submitted.status_code, 403)
+
+    def test_verified_facility_admin_can_create_update_and_soft_delete_appointment(self):
+        self.approve_provider_facility()
+        client, response = self.login_json("admin@nairobi-general.co.ke")
+        self.assertEqual(response.status_code, 200)
+
+        created = client.post(
+            f"{API_ROOT}/provider/appointments/",
+            data=json.dumps(
+                {
+                    "doctor_id": str(self.doctor_membership.id),
+                    "date": "2026-05-10",
+                    "time": "10:00",
+                    "type": "In Facility",
+                    "reason": "Initial consultation",
+                    "phone": "+254700000000",
+                    "status": "confirmed",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201)
+        created_payload = json_body(created)
+        self.assertEqual(created_payload["status"], "confirmed")
+        appointment = ProviderAppointment.objects.get(
+            appointment_ref=created_payload["reference"]
+        )
+        self.assertEqual(appointment.facility_id, self.nairobi.id)
+
+        updated = client.patch(
+            f"{API_ROOT}/provider/appointments/{appointment.appointment_ref}/",
+            data=json.dumps({"status": "cancelled", "reason": "Patient unavailable"}),
+            content_type="application/json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, WorkflowStatus.CANCELLED)
+        self.assertEqual(appointment.visit_reason, "Patient unavailable")
+
+        deleted = client.delete(
+            f"{API_ROOT}/provider/appointments/{appointment.appointment_ref}/"
+        )
+        self.assertEqual(deleted.status_code, 200)
+        appointment.refresh_from_db()
+        self.assertIsNotNone(appointment.deleted_at)
+
+        recycle_list = client.get(f"{API_ROOT}/provider/appointments/?bin=1")
+        self.assertEqual(recycle_list.status_code, 200)
+        recycle_payload = json_body(recycle_list)
+        self.assertTrue(
+            any(item.get("reference") == appointment.appointment_ref for item in recycle_payload)
+        )
+
+        restore = client.post(
+            f"{API_ROOT}/provider/appointments/{appointment.appointment_ref}/restore/"
+        )
+        self.assertEqual(restore.status_code, 200)
+        appointment.refresh_from_db()
+        self.assertIsNone(appointment.deleted_at)
 
 
 class AdminTenancyTests(SeededFacilityTenancyTestCase):

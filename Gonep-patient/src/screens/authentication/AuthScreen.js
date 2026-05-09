@@ -17,6 +17,7 @@ import { Input } from '../../atoms/Input';
 import { Icon } from '../../atoms/Icon';
 import { APP_CONFIG, IS_MOCK } from '../../config/env';
 import { getCurrentUser, loginPatient, registerPatient } from '../../api';
+import { ForgotPasswordScreen } from './ForgotPasswordScreen';
 
 export function AuthScreen({ onAuth, appName }) {
   const { C, isDark, toggle } = useTheme();
@@ -33,25 +34,39 @@ export function AuthScreen({ onAuth, appName }) {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [globalErr, setGlobalErr] = useState('');
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   const set = (k, v) => {
+    if (
+      k === 'email' ||
+      k === 'password' ||
+      k === 'confirm_password' ||
+      k === 'first_name' ||
+      k === 'last_name' ||
+      k === 'phone'
+    ) {
+      v = typeof v === 'string' ? v.trimStart() : v;
+    }
     setForm((f) => ({ ...f, [k]: v }));
     if (errors[k]) setErrors((e) => ({ ...e, [k]: '' }));
   };
 
   const validate = () => {
     const e = {};
-    if (!form.email) e.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email address';
-    if (!form.password) e.password = 'Password is required';
-    else if (form.password.length < 6) e.password = 'Password must be at least 6 characters';
+    const emailT = String(form.email || '').trim();
+    const passT = String(form.password || '').trim();
+    if (!emailT) e.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(emailT)) e.email = 'Enter a valid email address';
+    if (!passT) e.password = 'Password is required';
+    else if (passT.length < 6) e.password = 'Password must be at least 6 characters';
     if (mode === 'register') {
       if (!form.first_name.trim()) e.first_name = 'Required';
       if (!form.last_name.trim()) e.last_name = 'Required';
       if (!form.phone.trim()) e.phone = 'Phone number is required';
       else if (!/^\+?[\d\s\-]{9,15}$/.test(form.phone.trim())) e.phone = 'Enter a valid phone number';
-      if (!form.confirm_password) e.confirm_password = 'Please confirm your password';
-      else if (form.password !== form.confirm_password) e.confirm_password = 'Passwords do not match';
+      const confirmT = String(form.confirm_password || '').trim();
+      if (!confirmT) e.confirm_password = 'Please confirm your password';
+      else if (passT !== confirmT) e.confirm_password = 'Passwords do not match';
     }
     return e;
   };
@@ -68,14 +83,14 @@ export function AuthScreen({ onAuth, appName }) {
       if (mode === 'login') {
         const user = await loginPatient({
           email: form.email.trim(),
-          password: form.password,
+          password: form.password.trim(),
         });
         const hydratedUser = await getCurrentUser().catch(() => null);
         onAuth(hydratedUser || user);
       } else {
         const user = await registerPatient({
           email: form.email.trim(),
-          password: form.password,
+          password: form.password.trim(),
           first_name: form.first_name.trim(),
           last_name: form.last_name.trim(),
           phone: form.phone.trim(),
@@ -99,6 +114,26 @@ export function AuthScreen({ onAuth, appName }) {
     setErrors({});
     setGlobalErr('');
   };
+
+  if (forgotOpen) {
+    return (
+      <ForgotPasswordScreen
+        onBack={() => setForgotOpen(false)}
+        onComplete={({ email: resetEmail, tempPassword }) => {
+          setMode('login');
+          setForm((f) => ({
+            ...f,
+            email: resetEmail,
+            password: tempPassword,
+            confirm_password: '',
+          }));
+          setErrors({});
+          setGlobalErr('');
+          setForgotOpen(false);
+        }}
+      />
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -200,6 +235,12 @@ export function AuthScreen({ onAuth, appName }) {
               )}
 
               <Input label="Password" placeholder="••••••••" value={form.password} onChangeText={(v) => set('password', v)} error={errors.password} secureTextEntry icon="lock" hint={mode === 'register' ? 'Minimum 6 characters' : undefined} />
+
+              {mode === 'login' && (
+                <TouchableOpacity onPress={() => setForgotOpen(true)} style={{ alignSelf: 'flex-end', marginBottom: 8 }}>
+                  <Text style={{ color: C.primary, fontSize: 13, fontWeight: '600' }}>Forgot password?</Text>
+                </TouchableOpacity>
+              )}
 
               {mode === 'register' && (
                 <Input label="Confirm Password" placeholder="Re-enter your password" value={form.confirm_password} onChangeText={(v) => set('confirm_password', v)} error={errors.confirm_password} secureTextEntry icon="lock" />

@@ -20,17 +20,28 @@ export function createHttpLayer({ tokenMode = false } = {}) {
 
   return {
     async loginProvider(payload = {}) {
+      const body = JSON.stringify({ portal: 'provider', ...(payload || {}) });
       const res = await apiFetch(
         ENDPOINTS.authLogin,
-        { method: 'POST', body: JSON.stringify(payload || {}) },
+        { method: 'POST', body },
         { allowCsrfRetry: true }
       );
       if (!res?.authenticated) {
         throw new Error('Authentication failed. Check your email and password.');
       }
       if (res.csrfToken) csrfManager.setWebCsrfToken(res.csrfToken);
-      const profile = await apiFetch(ENDPOINTS.providerMe);
-      return normalizeProviderUser(profile);
+      try {
+        const profile = await apiFetch(ENDPOINTS.providerMe);
+        return normalizeProviderUser(profile);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/not found|404|membership/i.test(msg)) {
+          throw new Error(
+            'No hospital staff profile for this account. Use a facility staff demo user (run seed_demo_data) or register your facility — patient logins cannot open the provider portal.'
+          );
+        }
+        throw e;
+      }
     },
 
     async getCurrentUser() {
@@ -54,6 +65,50 @@ export function createHttpLayer({ tokenMode = false } = {}) {
         { method: 'POST', body },
         { allowCsrfRetry: true }
       );
+    },
+
+    // 2-step onboarding: lightweight registration without document upload.
+    // Returns { facility_id, facility_code, admin_email, ... } so the UI
+    // can redirect to login.
+    async registerFacilityPending(payload = {}) {
+      return apiFetch(
+        ENDPOINTS.authRegisterFacilityPending,
+        { method: 'POST', body: JSON.stringify(payload || {}) },
+        { allowCsrfRetry: true }
+      );
+    },
+
+    // Verification (post-login)
+    async getVerificationStatus() {
+      return apiFetch(ENDPOINTS.providerVerification);
+    },
+    async uploadVerificationDocument({ documentType, file }) {
+      const fd = new FormData();
+      fd.append('document_type', documentType);
+      fd.append('file', file);
+      return apiFetch(
+        ENDPOINTS.providerVerificationSubmit,
+        { method: 'POST', body: fd },
+        { allowCsrfRetry: true }
+      );
+    },
+    async deleteVerificationDocument(docType) {
+      return apiFetch(
+        ENDPOINTS.providerVerificationDocument(docType),
+        { method: 'DELETE' },
+        { allowCsrfRetry: true }
+      );
+    },
+
+    // Onboarding (Getting Started) flag
+    async getOnboardingState() {
+      return apiFetch(ENDPOINTS.providerOnboarding);
+    },
+    async setOnboardingCompleted(completed = true) {
+      return apiFetch(ENDPOINTS.providerOnboarding, {
+        method: 'PATCH',
+        body: JSON.stringify({ completed }),
+      });
     },
 
     async updateCurrentUser(payload = {}) {
@@ -90,7 +145,8 @@ export function createHttpLayer({ tokenMode = false } = {}) {
       }
     },
 
-    getAppointments: () => apiFetch(ENDPOINTS.appointments),
+    getAppointments: ({ bin = false } = {}) =>
+      apiFetch(`${ENDPOINTS.appointments}${bin ? '?bin=1' : ''}`),
     createAppointment: (payload) =>
       apiFetch(ENDPOINTS.appointments, {
         method: 'POST',
@@ -164,6 +220,8 @@ export function createHttpLayer({ tokenMode = false } = {}) {
       }),
     suspendStaff: (id) => apiFetch(`${ENDPOINTS.staff}${id}/suspend/`, { method: 'POST' }),
     reactivateStaff: (id) => apiFetch(`${ENDPOINTS.staff}${id}/reactivate/`, { method: 'POST' }),
+    resetStaffPassword: (id) =>
+      apiFetch(ENDPOINTS.staffResetPassword(id), { method: 'POST' }),
     appendLog(entry) {
       (async () => {
         try {
@@ -177,6 +235,63 @@ export function createHttpLayer({ tokenMode = false } = {}) {
       })();
     },
     getStaff: () => apiFetch(ENDPOINTS.staff),
+    getFacilitySpecialties: () => apiFetch(ENDPOINTS.facilitySpecialties),
+    createFacilitySpecialty: (payload) =>
+      apiFetch(ENDPOINTS.facilitySpecialties, {
+        method: 'POST',
+        body: JSON.stringify(payload || {}),
+      }),
+    updateFacilitySpecialty: (id, payload) =>
+      apiFetch(ENDPOINTS.facilitySpecialtyDetail(id), {
+        method: 'PATCH',
+        body: JSON.stringify(payload || {}),
+      }),
+    deleteFacilitySpecialty: (id) =>
+      apiFetch(ENDPOINTS.facilitySpecialtyDetail(id), { method: 'DELETE' }),
+
+    // Booking flow helpers
+    getBookingSpecialties: () => apiFetch(ENDPOINTS.bookingSpecialties),
+    getBookingDoctors: (specialty) =>
+      apiFetch(`${ENDPOINTS.bookingDoctors}?specialty=${encodeURIComponent(specialty || '')}`),
+    searchBookingPatients: (q) =>
+      apiFetch(`${ENDPOINTS.bookingPatients}?q=${encodeURIComponent(q || '')}`),
+    getBookingDoctorSlots: (providerCode, type) =>
+      apiFetch(`${ENDPOINTS.bookingDoctorSlots(providerCode)}${type ? `?type=${encodeURIComponent(type)}` : ''}`),
+    confirmAppointment: (ref) =>
+      apiFetch(ENDPOINTS.appointmentConfirm(ref), { method: 'PATCH' }),
+    rejectAppointment: (ref, reason) =>
+      apiFetch(ENDPOINTS.appointmentReject(ref), {
+        method: 'PATCH',
+        body: JSON.stringify({ reason: reason || 'Rejected by provider' }),
+      }),
+    rescheduleAppointment: (ref, scheduledFor, appointmentType) => {
+      const body = { scheduled_for: scheduledFor };
+      if (appointmentType) body.appointment_type = appointmentType;
+      return apiFetch(ENDPOINTS.appointmentReschedule(ref), {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+    },
+    assignAppointmentDoctor: (ref, doctorId) =>
+      apiFetch(ENDPOINTS.appointmentAssign(ref), {
+        method: 'PATCH',
+        body: JSON.stringify({ doctor_id: doctorId }),
+      }),
+    startAppointment: (ref) =>
+      apiFetch(ENDPOINTS.appointmentStart(ref), { method: 'PATCH' }),
+    completeAppointment: (ref) =>
+      apiFetch(ENDPOINTS.appointmentComplete(ref), { method: 'PATCH' }),
+    getAppointmentMeetingRoom: (ref) =>
+      apiFetch(ENDPOINTS.appointmentMeetingRoom(ref)),
+    updateAppointment: (ref, payload) =>
+      apiFetch(ENDPOINTS.appointmentDetail(ref), {
+        method: 'PATCH',
+        body: JSON.stringify(payload || {}),
+      }),
+    softDeleteAppointment: (ref) =>
+      apiFetch(ENDPOINTS.appointmentDetail(ref), { method: 'DELETE' }),
+    restoreAppointment: (ref) =>
+      apiFetch(ENDPOINTS.appointmentRestore(ref), { method: 'POST' }),
     getConsultations: () => apiFetch(ENDPOINTS.consultations || ''),
     getPatientConsultations: (patientId) =>
       apiFetch(`${ENDPOINTS.consultations || ''}?patient_id=${patientId}`),
@@ -227,5 +342,19 @@ export function createHttpLayer({ tokenMode = false } = {}) {
         method: 'POST',
         body: JSON.stringify(payload || {}),
       }),
+
+    requestPasswordReset(payload = {}) {
+      return apiFetch(ENDPOINTS.authForgotPasswordRequest, {
+        method: 'POST',
+        body: JSON.stringify({ portal: 'provider', ...(payload || {}) }),
+      });
+    },
+
+    verifyPasswordReset(payload = {}) {
+      return apiFetch(ENDPOINTS.authForgotPasswordVerify, {
+        method: 'POST',
+        body: JSON.stringify({ portal: 'provider', ...(payload || {}) }),
+      });
+    },
   };
 }

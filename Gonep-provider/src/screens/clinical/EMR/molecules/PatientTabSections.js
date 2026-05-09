@@ -1,6 +1,4 @@
 // ─── screens/clinical/EMR/molecules/PatientTabSections.js ────────────────────
-// All tab-section molecules for PatientDetailScreen.
-// Each is a pure render component; logic lives in usePatientDetail hook.
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { Card }  from '../../../../atoms/Card';
@@ -10,7 +8,12 @@ import { Icon }  from '../../../../atoms/Icon';
 import { SectionHeader } from '../../../../molecules/SectionHeader';
 import { EmptyState }    from '../../../../molecules/EmptyState';
 import { useTheme } from '../../../../theme/ThemeContext';
-import { isWithinWindow, TIMELINE_TYPE_META, TIMELINE_TYPE_LABEL } from '../../../../constants/emr';
+import {
+  isWithinWindow,
+  TIMELINE_TYPE_META,
+  TIMELINE_TYPE_LABEL,
+  apptDisplayReason,
+} from '../../../../constants/emr';
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 export function OverviewTab({ patient }) {
@@ -159,8 +162,8 @@ export function PrescriptionsTab({ prescriptions, caps, user, onCancelRx }) {
             : new Date(Date.now() - 25 * 3600000).toISOString(),
           48
         );
-        const canCancel = caps.canEditRx && isOwnRx && isPending;
-        const canEdit   = caps.canEditRx && isOwnRx && isRecent && !isCancelled;
+        const canCancel   = caps.canEditRx && isOwnRx && isPending;
+        const canEdit     = caps.canEditRx && isOwnRx && isRecent && !isCancelled;
         const statusColor = isCancelled ? 'danger' : isPending ? 'warning' : 'success';
         const statusLabel = isCancelled ? 'Cancelled' : isPending ? 'Pending' : 'Dispatched';
 
@@ -240,16 +243,15 @@ export function AppointmentsTab({ appointments }) {
               <Icon name="calendar" lib="feather" size={16} color={C.primary} />
             </View>
             <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={[s.rxDrug, { color: C.text }]}>{a.reason}</Text>
+              {/* Use apptDisplayReason so raw metadata tokens never surface */}
+              <Text style={[s.rxDrug, { color: C.text }]}>{apptDisplayReason(a)}</Text>
               <Text style={[s.rxSub,  { color: C.textSec }]}>{a.type} · {a.date} {a.time}</Text>
             </View>
             <Badge label={a.status}
               color={
-                a.status === 'confirmed' || a.status === 'completed'
-                  ? 'success'
-                  : a.status === 'unassigned' || a.status === 'cancelled'
-                    ? 'danger'
-                    : 'warning'
+                a.status === 'confirmed' || a.status === 'completed' ? 'success'
+                  : a.status === 'unassigned' || a.status === 'cancelled' ? 'danger'
+                  : 'warning'
               } />
           </View>
         </Card>
@@ -259,14 +261,54 @@ export function AppointmentsTab({ appointments }) {
 }
 
 // ─── Timeline tab ─────────────────────────────────────────────────────────────
-export function TimelineTab({ timeline }) {
+export function TimelineTab({ timeline, sortOrder = 'desc', onChangeSortOrder }) {
   const { C } = useTheme();
+  const isDesc = sortOrder === 'desc';
+
   return (
     <View>
+      {/* Button shows the CURRENT order; tapping switches to the opposite */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 10, gap: 6 }}>
+        <Text style={{ fontSize: 11, color: C.textMuted }}>Sort:</Text>
+        <TouchableOpacity
+          onPress={() => onChangeSortOrder?.(isDesc ? 'asc' : 'desc')}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
+            borderWidth: 1, borderColor: C.border, backgroundColor: C.surface,
+          }}
+        >
+          <Icon name={isDesc ? 'arrow-down' : 'arrow-up'} lib="feather" size={11} color={C.text} />
+          <Text style={{ fontSize: 11, color: C.text, fontWeight: '600' }}>
+            {isDesc ? 'Newest first' : 'Oldest first'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {timeline.map((item, i) => {
-        const ti = TIMELINE_TYPE_META[item._type] || TIMELINE_TYPE_META.consultation;
+        const ti        = TIMELINE_TYPE_META[item._type] || TIMELINE_TYPE_META.consultation;
         const iconColor = ti.colorKey === 'warning' ? C.warning : ti.colorKey === 'success' ? C.success : C.primary;
         const iconBg    = ti.colorKey === 'warning' ? C.warningLight : ti.colorKey === 'success' ? C.successLight : C.primaryLight;
+
+        // ── Build a clean display title per type ──────────────────────────────
+        let displayTitle;
+        switch (item._type) {
+          case 'consultation':
+            displayTitle = `${item.type} — ${item.assessment?.split('.')[0] ?? 'Consultation'}`;
+            break;
+          case 'lab':
+            displayTitle = `${item.test}: ${item.result}`;
+            break;
+          case 'rx':
+            displayTitle = `${item.drug} (${item.instructions})`;
+            break;
+          case 'appointment':
+          default:
+            // apptDisplayReason strips RESCHEDULE|…, CANCEL_META|…, REJECT|… tokens
+            displayTitle = `${apptDisplayReason(item)} · ${item.type}`;
+            break;
+        }
+
         return (
           <View key={item.id + i} style={s.timelineRow}>
             <View style={s.timelineLine}>
@@ -285,10 +327,7 @@ export function TimelineTab({ timeline }) {
                 <Text style={{ fontSize: 10, color: C.textMuted }}>{item._date}</Text>
               </View>
               <Text style={{ fontSize: 13, fontWeight: '600', color: C.text }}>
-                {item._type === 'consultation' ? `${item.type} — ${item.assessment?.split('.')[0]}` :
-                 item._type === 'lab'          ? `${item.test}: ${item.result}` :
-                 item._type === 'rx'           ? `${item.drug} (${item.instructions})` :
-                 `${item.reason} · ${item.type}`}
+                {displayTitle}
               </Text>
               {item._type === 'consultation' && (
                 <Text style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>by {item.doctor_name}</Text>
@@ -303,13 +342,11 @@ export function TimelineTab({ timeline }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  // Overview
   infoCard:   { marginBottom: 10, padding: 14 },
   infoRow:    { flexDirection: 'row', paddingVertical: 9, borderBottomWidth: 1 },
   infoLbl:    { fontSize: 12, width: 110, flexShrink: 0 },
   infoVal:    { fontSize: 13, fontWeight: '500', flex: 1 },
   tag:        { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  // Consultations
   restrictBanner: { flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 12 },
   consultCard:    { marginBottom: 10, padding: 14 },
   consultHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
@@ -321,17 +358,14 @@ const s = StyleSheet.create({
   soapDot:        { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 },
   soapLabel:      { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
   soapText:       { fontSize: 13, lineHeight: 19 },
-  // Rx
   rxCard:    { marginBottom: 8, padding: 12 },
   rxIcon:    { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   rxDrug:    { fontSize: 13, fontWeight: '700', marginBottom: 2 },
   rxSub:     { fontSize: 11, marginBottom: 1 },
   rxDate:    { fontSize: 10 },
   rxActions: { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTopWidth: 1 },
-  // Lab / Appt
   labCard:   { marginBottom: 8, padding: 12 },
   labIcon:   { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  // Timeline
   timelineRow:       { flexDirection: 'row', marginBottom: 12 },
   timelineLine:      { width: 36, alignItems: 'center' },
   timelineDot:       { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },

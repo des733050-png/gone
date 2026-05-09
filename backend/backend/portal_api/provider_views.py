@@ -1,28 +1,22 @@
-import re
-import secrets
-import string
-import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from django.conf import settings
-from django.contrib.auth import get_user_model, logout
+from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Q
-from django.utils.dateparse import parse_date, parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from django.utils import timezone
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.authtoken.models import Token
 from rest_framework.views import APIView
 
 from core.models import (
+    BookingSource,
+    FacilitySpecialty,
     PatientBooking,
     PatientFacilityAccess,
-    PatientPortalNotification,
     PatientProfile,
-    PatientUserLink,
     ProviderActivityLog,
     ProviderAppointment,
     ProviderAvailability,
@@ -38,13 +32,20 @@ from core.models import (
     ProviderProfile,
     ProviderSubRole,
     ProviderSupportTicket,
+    ProviderVerificationDocument,
+    ProviderVerificationDocumentType,
+    ProviderVerificationStatus,
+    ProviderVerificationSubmission,
     WorkflowStatus,
 )
 from portal_api.utils import (
+    ACCESS_RESTRICTED,
     build_provider_payload,
+    build_provider_verification_payload,
     calculate_age,
     format_uuid,
     get_staff_membership,
+    is_provider_verified,
     split_name,
 )
 
@@ -61,10 +62,34 @@ ROLE_UID_PREFIX = {
 PAYMENT_METHOD_LABELS = {"cash": "Cash", "mpesa": "M-Pesa", "card": "Card"}
 
 
-def ensure_provider_membership(user):
+class ProviderVerificationRequired(APIException):
+    status_code = 403
+    default_code = "VERIFICATION_REQUIRED"
+
+    def __init__(self, verification_payload):
+        self.detail = {
+            "success": False,
+            "error": "Verification required",
+            "code": "VERIFICATION_REQUIRED",
+            "data": {
+                "verification_status": verification_payload["verification_status"],
+                "access": ACCESS_RESTRICTED,
+            },
+        }
+        Exception.__init__(self, self.detail)
+
+
+def ensure_provider_membership(user, enforce_verification=True):
     membership = get_staff_membership(user)
     if membership is None:
-        raise NotFound("Provider membership not found.")
+        raise NotFound(
+            "Provider membership not found. Use a facility staff account (e.g. demo "
+            "facility admin from seed_demo_data), not a patient-only login."
+        )
+    if enforce_verification and not is_provider_verified(membership.facility):
+        raise ProviderVerificationRequired(
+            build_provider_verification_payload(membership.facility)
+        )
     return membership
 
 
@@ -119,54 +144,6 @@ def next_identifier(model_class, field_name, prefix, padding=4):
         if not model_class.objects.filter(**{field_name: candidate}).exists():
             return candidate
         counter += 1
-
-
-def _temporary_portal_password():
-    """Cryptographically strong one-time password (meets mixed rules for UI validators)."""
-    alphabet = string.ascii_letters + string.digits
-    core = "".join(secrets.choice(alphabet) for _ in range(14))
-    if not re.search(r"\d", core):
-        core += "9"
-    if not re.search(r"[A-Z]", core):
-        core += "A"
-    if not re.search(r"[a-z]", core):
-        core += "a"
-    return core
-
-
-def _portal_login_url_hint():
-    return (getattr(settings, "GONEP_PORTAL_LOGIN_URL", "") or "").strip()
-
-
-def _patient_login_url_hint():
-    return (getattr(settings, "GONEP_PATIENT_LOGIN_URL", "") or _portal_login_url_hint()).strip()
-
-
-def _notify_clinical_settings_recipients(facility, actor_user, summary_text):
-    """In-app notifications for doctors and facility admins when clinical settings change."""
-    if not summary_text:
-        return
-    actor_label = actor_user.get_full_name().strip() or actor_user.email or actor_user.get_username()
-    body = f"{actor_label} updated clinical settings: {summary_text}"
-    recipients = ProviderMembership.objects.filter(
-        facility=facility,
-        is_active=True,
-        user__is_active=True,
-        role__in=(ProviderSubRole.DOCTOR, ProviderSubRole.FACILITY_ADMIN),
-    ).select_related("user")
-    for membership in recipients:
-        ProviderPortalNotification.objects.create(
-            notification_code=next_identifier(
-                ProviderPortalNotification, "notification_code", "PVN-", 4
-            ),
-            user=membership.user,
-            facility=facility,
-            title="Clinical settings updated",
-            message=body,
-            icon_name="settings",
-            icon_lib="feather",
-            color="primary",
-        )
 
 
 def build_unique_username(email):
@@ -228,14 +205,23 @@ def derive_inventory_status(stock, reorder):
 
 
 def workflow_to_appointment_status(appointment):
-    if appointment.provider_id is None:
-        return "unassigned"
+    """
+    Canonical 5-state mapping (matches the patient/provider UI):
+      pending  | rejected | cancelled | confirmed | in_progress | completed
+    Note: 'rejected' and 'cancelled' are kept distinct on the wire so the
+    frontend can show the precise reason, but the UI groups them as one tab.
+    """
     if appointment.status == WorkflowStatus.CANCELLED:
         return "cancelled"
+    if appointment.status == WorkflowStatus.REJECTED:
+        return "rejected"
     if appointment.status == WorkflowStatus.COMPLETED:
         return "completed"
+    if appointment.status == WorkflowStatus.IN_PROGRESS:
+        return "in_progress"
     if appointment.status == WorkflowStatus.CONFIRMED:
         return "confirmed"
+    # DRAFT, IDLE, unassigned (provider_id None) → pending approval
     return "pending"
 
 
@@ -285,6 +271,9 @@ def build_staff_payload(membership):
         "last_name": last_name,
         "phone": provider.phone if provider else "",
         "specialty": provider.specialty if provider and provider.specialty else None,
+        "facility_specialty_id": format_uuid(provider.facility_specialty_id)
+        if provider and provider.facility_specialty_id
+        else None,
         "facility": membership.facility.name,
         "facility_id": facility_id,
         "facility_code": membership.facility.facility_code,
@@ -300,38 +289,180 @@ def build_staff_payload(membership):
     }
 
 
+def resolve_staff_doctor_specialty(facility, data, *, allow_empty=False):
+    """Map API fields to a FacilitySpecialty + display name for doctor profiles."""
+    fs_id = str(data.get("facility_specialty_id") or "").strip()
+    new_name = str(data.get("new_specialty_name") or "").strip()
+    legacy = str(data.get("specialty") or "").strip()
+    if not fs_id and not new_name and not legacy:
+        if allow_empty:
+            return None, ""
+        raise ValidationError(
+            {
+                "specialty": "Specialty is required (choose a catalog entry or enter a new name)."
+            }
+        )
+    if fs_id:
+        fs = FacilitySpecialty.objects.filter(pk=fs_id, facility=facility).first()
+        if not fs:
+            raise ValidationError(
+                {"facility_specialty_id": "Unknown specialty for this facility."}
+            )
+        return fs, fs.name
+    if new_name:
+        fs = FacilitySpecialty.resolve_for_facility(facility, new_name)
+        if not fs:
+            raise ValidationError({"new_specialty_name": "Specialty name is required."})
+        return fs, fs.name
+    fs = FacilitySpecialty.resolve_for_facility(facility, legacy)
+    return fs, (fs.name if fs else legacy[:120])
+
+
+class ProviderFacilitySpecialtiesView(APIView):
+    """GET/POST /api/v1/provider/specialties/ — facility specialty catalog (admin)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+        rows = FacilitySpecialty.objects.filter(facility=membership.facility).order_by(
+            "name"
+        )
+        return Response(
+            [{"id": format_uuid(s.id), "name": s.name} for s in rows]
+        )
+
+    def post(self, request):
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+        name = str((request.data or {}).get("name") or "").strip()
+        if len(name) < 2:
+            raise ValidationError({"name": "Enter a specialty name (at least 2 characters)."})
+        fs = FacilitySpecialty.resolve_for_facility(membership.facility, name)
+        return Response({"id": format_uuid(fs.id), "name": fs.name}, status=201)
+
+
+class ProviderFacilitySpecialtyDetailView(APIView):
+    """DELETE /api/v1/provider/specialties/<id>/ — remove catalog entry if unused."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, specialty_id):
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+        fs = FacilitySpecialty.objects.filter(
+            pk=specialty_id, facility=membership.facility
+        ).first()
+        if fs is None:
+            raise NotFound("Specialty not found.")
+        if ProviderProfile.objects.filter(
+            facility=membership.facility, facility_specialty=fs
+        ).exists():
+            raise ValidationError(
+                {
+                    "detail": "Reassign doctors to another specialty before deleting this one."
+                }
+            )
+        fs.delete()
+        return Response(status=204)
+
+
 def build_appointment_payload(appointment):
     patient = appointment.patient
     facility = appointment.facility
     doctor_id = provider_membership_uid_for_profile(appointment.provider, facility)
+    patient_booking_ref = None
+    if hasattr(appointment, "patient_booking") and appointment.patient_booking_id:
+        patient_booking_ref = appointment.patient_booking.booking_ref
     return {
         "id": format_uuid(appointment.id),
         "reference": appointment.appointment_ref,
+        "patient_booking_ref": patient_booking_ref,
         "patient": patient.full_name if patient else "Walk-in Patient",
         "patient_id": patient.patient_code if patient else None,
         "doctor_id": doctor_id,
+        "doctor_name": appointment.provider.full_name if appointment.provider else None,
+        "provider_code": appointment.provider.provider_code if appointment.provider else None,
         "age": calculate_age(patient.date_of_birth) if patient else None,
         "type": appointment.appointment_type or "In Facility",
         "time": compact_time_label(appointment.scheduled_for),
         "date": compact_day_label(appointment.scheduled_for),
+        "scheduled_for": appointment.scheduled_for.isoformat() if appointment.scheduled_for else None,
         "status": workflow_to_appointment_status(appointment),
+        "source": appointment.source,
+        "source_label": appointment.get_source_display(),
         "reason": appointment.visit_reason,
         "phone": appointment.patient_phone or (patient.phone if patient else ""),
-        "scheduled_for": appointment.scheduled_for.isoformat()
-        if appointment.scheduled_for
-        else None,
+        "email": patient.email if patient else "",
+    }
+
+
+def _patient_booking_status_for_provider(booking):
+    """Map PatientBooking WorkflowStatus to one of the 5 canonical states:
+    pending | rejected | cancelled | confirmed | in_progress | completed."""
+    s = booking.status
+    if s == WorkflowStatus.CANCELLED:   return "cancelled"
+    if s == WorkflowStatus.REJECTED:    return "rejected"
+    if s == WorkflowStatus.COMPLETED:   return "completed"
+    if s == WorkflowStatus.IN_PROGRESS: return "in_progress"
+    if s == WorkflowStatus.CONFIRMED:   return "confirmed"
+    return "pending"  # DRAFT / IDLE / anything else
+
+
+def _build_patient_booking_as_appointment(booking):
+    """Convert a patient-created PatientBooking into the same dict shape as build_appointment_payload."""
+    patient = booking.patient
+    provider = booking.provider
+    return {
+        "id": format_uuid(booking.id),
+        "reference": booking.booking_ref,
+        "appointment_ref": booking.booking_ref,
+        "patient_booking_ref": booking.booking_ref,
+        "patient": patient.full_name if patient else "Patient",
+        "patient_id": patient.patient_code if patient else None,
+        "doctor_id": provider_membership_uid_for_profile(provider, booking.facility) if provider else None,
+        "doctor_name": provider.full_name if provider else None,
+        "provider_code": provider.provider_code if provider else None,
+        "age": calculate_age(patient.date_of_birth) if patient else None,
+        "type": booking.appointment_type or "In Facility",
+        "time": compact_time_label(booking.scheduled_for),
+        "date": compact_day_label(booking.scheduled_for),
+        "scheduled_for": booking.scheduled_for.isoformat() if booking.scheduled_for else None,
+        "status": _patient_booking_status_for_provider(booking),
+        "source": booking.source or "patient",
+        "source_label": "Patient",
+        "reason": booking.notes or "",
+        "phone": patient.phone if patient else "",
+        "email": patient.email if patient else "",
+        "_is_patient_booking": True,  # flag so frontend can use booking_ref for confirm/reject
     }
 
 
 def build_consultation_payload(consultation):
     facility = consultation.facility or (consultation.appointment.facility if consultation.appointment else None)
     doctor_id = provider_membership_uid_for_profile(consultation.provider, facility)
+    # Compute whether the consultation is still within the admin-configured
+    # edit window so the UI can disable the Save button when locked.
+    edit_window_hours = 24
+    if facility is not None:
+        edit_window_hours = (
+            ProviderClinicalSetting.objects.filter(facility=facility)
+            .values_list("edit_window_hours", flat=True)
+            .first()
+            or 24
+        )
+    is_editable = False
+    if consultation.consulted_at:
+        is_editable = consultation.consulted_at >= (
+            timezone.now() - timedelta(hours=edit_window_hours)
+        )
     return {
         "id": format_uuid(consultation.id),
         "reference": consultation.consultation_ref,
         "patient_id": consultation.patient.patient_code if consultation.patient else None,
         "doctor_id": doctor_id,
-        "doctor_name": consultation.provider.full_name if consultation.provider else "Gonep Team",
+        "doctor_name": consultation.provider.full_name if consultation.provider else "Care Team",
         "date": compact_day_label(consultation.consulted_at),
         "created_at": consultation.consulted_at.isoformat() if consultation.consulted_at else consultation.created_at.isoformat(),
         "type": consultation.consultation_type or "In Facility",
@@ -340,6 +471,9 @@ def build_consultation_payload(consultation):
         "assessment": consultation.assessment,
         "plan": consultation.plan,
         "uploaded_files": consultation.uploaded_files or [],
+        # UI gating — see ProviderConsultationDetailView.patch
+        "is_editable": is_editable,
+        "edit_window_hours": edit_window_hours,
     }
 
 
@@ -426,7 +560,6 @@ def build_notification_payload(notification):
     return {
         "id": format_uuid(notification.id),
         "code": notification.notification_code,
-        "event_id": notification.event_id or "",
         "icon": notification.icon_name,
         "lib": notification.icon_lib,
         "title": notification.title,
@@ -435,62 +568,6 @@ def build_notification_payload(notification):
         "read": notification.read,
         "color": notification.color,
     }
-
-
-def _next_patient_notification_code():
-    counter = PatientPortalNotification.objects.count() + 1
-    while True:
-        candidate = f"PT-NOTIF-{counter:04d}"
-        if not PatientPortalNotification.objects.filter(notification_code=candidate).exists():
-            return candidate
-        counter += 1
-
-
-def _notify_patient_for_provider_appointment(appointment, transition, actor_label):
-    if not appointment.patient_id:
-        return
-    booking = (
-        PatientBooking.objects.filter(
-            patient=appointment.patient,
-            facility=appointment.facility,
-            scheduled_for=appointment.scheduled_for,
-        )
-        .order_by("-updated_at")
-        .first()
-    )
-    if booking is None:
-        return
-    event_id = f"patient-booking:{booking.booking_ref}:provider-{transition}"
-    if transition == "approved":
-        title = "Appointment confirmed"
-        body = f"{actor_label} confirmed your appointment."
-    elif transition == "rejected":
-        title = "Appointment request rejected"
-        body = f"{actor_label} rejected your appointment request."
-    elif transition == "cancelled":
-        title = "Appointment cancelled"
-        body = f"{actor_label} cancelled your appointment."
-    else:
-        return
-    notification, created = PatientPortalNotification.objects.get_or_create(
-        patient=booking.patient,
-        facility=booking.facility,
-        event_id=event_id,
-        defaults={
-            "notification_code": _next_patient_notification_code(),
-            "kind": f"appointment_{transition}",
-            "title": title,
-            "body": body,
-            "icon_lib": "feather",
-            "icon_name": "calendar",
-            "read": False,
-        },
-    )
-    if not created:
-        notification.title = title
-        notification.body = body
-        notification.read = False
-        notification.save(update_fields=["title", "body", "read", "updated_at"])
 
 
 def build_support_ticket_payload(ticket):
@@ -524,7 +601,6 @@ def build_activity_log_payload(log):
         "id": format_uuid(log.id),
         "reference": log.log_code,
         "ts": compact_datetime_label(log.occurred_at),
-        "occurred_at": log.occurred_at.isoformat() if log.occurred_at else None,
         "staff": log.staff_name,
         "staff_id": log.staff_membership_id,
         "role": log.role,
@@ -641,6 +717,98 @@ def get_appointment_or_raise(facility, appointment_ref):
     )
 
 
+def parse_scheduled_for(data):
+    scheduled_for = data.get("scheduled_for")
+    if scheduled_for:
+        parsed = parse_datetime(str(scheduled_for))
+        if parsed is None:
+            raise ValidationError({"scheduled_for": "Use ISO datetime format."})
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    date_value = data.get("date")
+    time_value = data.get("time")
+    if not date_value and not time_value:
+        return None
+    parsed_date = parse_date(str(date_value or ""))
+    parsed_time = parse_time(str(time_value or ""))
+    if parsed_date is None or parsed_time is None:
+        raise ValidationError({"scheduled_for": "Use YYYY-MM-DD date and HH:MM time."})
+    return timezone.make_aware(
+        datetime.combine(parsed_date, parsed_time),
+        timezone.get_current_timezone(),
+    )
+
+
+def resolve_patient_for_appointment(facility, patient_ref):
+    if not patient_ref:
+        return None
+    patient = _lookup_by_id_or_code(
+        PatientProfile.objects.all(),
+        str(patient_ref).strip(),
+        "patient_code",
+        "Patient not found.",
+    )
+    # Cross-facility booking support: when a provider books an existing patient
+    # from another facility, grant active access to the provider's facility so
+    # the patient appears in this facility context and linked records are valid.
+    access_row, _ = PatientFacilityAccess.objects.get_or_create(
+        patient=patient,
+        facility=facility,
+        defaults={"is_default": False, "is_active": True},
+    )
+    if not access_row.is_active:
+        access_row.is_active = True
+        access_row.save(update_fields=["is_active", "updated_at"])
+    return patient
+
+
+def apply_appointment_payload(appointment, membership, data):
+    if "doctor_id" in data:
+        doctor_id = str(data.get("doctor_id") or "").strip()
+        if not doctor_id:
+            appointment.provider = None
+        else:
+            doctor_membership = resolve_provider_membership_for_portal_id(
+                membership.facility, doctor_id, ProviderSubRole.DOCTOR
+            )
+            appointment.provider = doctor_membership.provider
+
+    if "patient_id" in data:
+        appointment.patient = resolve_patient_for_appointment(
+            membership.facility,
+            data.get("patient_id"),
+        )
+
+    scheduled_for = parse_scheduled_for(data)
+    if scheduled_for is not None:
+        appointment.scheduled_for = scheduled_for
+
+    for payload_name, model_field in [
+        ("type", "appointment_type"),
+        ("appointment_type", "appointment_type"),
+        ("phone", "patient_phone"),
+        ("patient_phone", "patient_phone"),
+        ("reason", "visit_reason"),
+        ("visit_reason", "visit_reason"),
+        ("notes", "notes"),
+    ]:
+        if payload_name in data:
+            setattr(appointment, model_field, str(data.get(payload_name) or "").strip())
+
+    if "status" in data:
+        requested_status = str(data.get("status") or "").strip()
+        status_map = {
+            "confirmed": WorkflowStatus.CONFIRMED,
+            "cancelled": WorkflowStatus.CANCELLED,
+            "unassigned": WorkflowStatus.DRAFT,
+            "pending": WorkflowStatus.DRAFT,
+            "completed": WorkflowStatus.COMPLETED,
+        }
+        appointment.status = status_map.get(requested_status, appointment.status)
+
+
 def get_consultation_or_raise(facility, consultation_ref):
     return _lookup_by_id_or_code(
         ProviderConsultation.objects.select_related(
@@ -702,24 +870,46 @@ class ProviderMeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        membership = ensure_provider_membership(request.user)
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
         return Response(build_provider_payload(membership))
 
     @transaction.atomic
     def patch(self, request):
-        membership = ensure_provider_membership(request.user)
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
         user = membership.user
         provider = membership.provider or ensure_membership_profile(membership)
         data = request.data or {}
 
+        old_first = user.first_name
+        old_last = user.last_name
         first_name = str(data.get("first_name", user.first_name)).strip()
         last_name = str(data.get("last_name", user.last_name)).strip()
-        phone = str(data.get("phone", provider.phone if provider else "")).strip()
+
+        # Provider can edit name ONLY ONCE. After the first change, name_locked
+        # is true; further requests must keep the existing name. Specialty +
+        # facility are always read-only here (only facility admins can change
+        # specialty via dedicated endpoints).
+        name_locked = bool(getattr(provider, "name_locked", False)) if provider else False
+        if name_locked and ((first_name, last_name) != (old_first, old_last)):
+            raise ValidationError({
+                "name": "Name has already been changed once. Contact your facility admin to make further changes."
+            })
 
         if not first_name:
             raise ValidationError({"first_name": "First name is required."})
         if not last_name:
             raise ValidationError({"last_name": "Last name is required."})
+
+        # Normalize phone to E.164 (Kenya) — accepts 0712…, 254…, +254… inputs.
+        from portal_api.utils import normalize_kenya_phone
+        raw_phone = str(data.get("phone", provider.phone if provider else "")).strip()
+        if raw_phone:
+            try:
+                phone = normalize_kenya_phone(raw_phone)
+            except ValueError as exc:
+                raise ValidationError({"phone": str(exc)})
+        else:
+            phone = ""
 
         user.first_name = first_name
         user.last_name = last_name
@@ -728,42 +918,223 @@ class ProviderMeView(APIView):
         if provider:
             provider.full_name = f"{first_name} {last_name}".strip()
             provider.phone = phone
-            if "specialty" in data:
-                provider.specialty = str(data.get("specialty") or "").strip()
-            provider.save(update_fields=["full_name", "phone", "specialty"])
+            # Specialty is intentionally NOT updatable here — only facility
+            # admins set it via the staff/specialty endpoints.
+            update_fields = ["full_name", "phone"]
+            if not name_locked and (first_name, last_name) != (old_first, old_last):
+                provider.name_locked = True
+                update_fields.append("name_locked")
+            provider.save(update_fields=update_fields)
 
         membership.refresh_from_db()
         return Response(build_provider_payload(membership))
 
 
-class ProviderChangePasswordView(APIView):
+class ProviderVerificationStatusView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
+        verification = build_provider_verification_payload(membership.facility)
+        return Response(
+            {
+                "success": True,
+                "data": verification,
+                "message": "Provider verification status retrieved.",
+            }
+        )
+
+
+class ProviderOnboardingStateView(APIView):
+    """
+    GET   /api/v1/provider/onboarding/  → returns { completed: bool, should_show: bool }
+    PATCH /api/v1/provider/onboarding/  → mark onboarding completed/dismissed
+
+    `should_show` is true when:
+      - the facility's verification status is VERIFIED
+      - the membership has not yet completed/dismissed onboarding
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _payload(self, membership):
+        from portal_api.utils import build_provider_verification_payload
+        verification = build_provider_verification_payload(membership.facility)
+        is_verified = verification.get("verification_status") == ProviderVerificationStatus.VERIFIED
+        return {
+            "completed": bool(getattr(membership, "onboarding_completed", False)),
+            "should_show": is_verified and not getattr(membership, "onboarding_completed", False),
+            "verification_status": verification.get("verification_status"),
+        }
+
+    def get(self, request):
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
+        return Response(self._payload(membership))
+
+    def patch(self, request):
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
+        completed = bool((request.data or {}).get("completed", True))
+        membership.onboarding_completed = completed
+        membership.save(update_fields=["onboarding_completed", "updated_at"])
+        return Response(self._payload(membership))
+
+
+class ProviderVerificationSubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser)
 
     @transaction.atomic
     def post(self, request):
-        ensure_provider_membership(request.user)
-        data = request.data or {}
-        current_password = str(data.get("current_password") or "")
-        new_password = str(data.get("new_password") or "")
-        if not current_password or not new_password:
-            raise ValidationError({"detail": "current_password and new_password are required."})
-        if not request.user.check_password(current_password):
-            return Response({"error": "Current password is incorrect"}, status=400)
-        if new_password == current_password:
-            raise ValidationError(
-                {"new_password": "New password must be different from your current password."}
-            )
-        if len(new_password) < 8 or not re.search(r"\d", new_password) or not re.search(r"[A-Z]", new_password):
-            raise ValidationError(
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+
+        verification = build_provider_verification_payload(membership.facility)
+        if not verification["can_upload_verification_documents"]:
+            return Response(
                 {
-                    "new_password": "Password must be at least 8 characters and include one number and one uppercase letter."
-                }
+                    "success": False,
+                    "error": "Verification documents cannot be uploaded right now.",
+                    "code": "VERIFICATION_UPLOAD_LOCKED",
+                    "data": verification,
+                },
+                status=409,
             )
-        request.user.set_password(new_password)
-        request.user.save(update_fields=["password"])
-        Token.objects.filter(user=request.user).delete()
-        logout(request)
-        return Response({"detail": "Password updated. Please sign in again."})
+
+        # Accept loose aliases (case-insensitive, dashes/spaces → underscores).
+        raw_type = str(request.data.get("document_type") or "").strip()
+        normalized = raw_type.upper().replace("-", "_").replace(" ", "_")
+        # Friendly aliases used by older clients
+        alias = {
+            "REG":          "REGISTRATION_CERTIFICATE",
+            "REGISTRATION": "REGISTRATION_CERTIFICATE",
+            "LICENSE":      "OPERATING_LICENSE",
+            "LICENCE":      "OPERATING_LICENSE",
+            "TAX":          "TAX_COMPLIANCE",
+            "ACCRED":       "ACCREDITATION",
+        }
+        document_type = alias.get(normalized, normalized)
+        valid_types = {choice[0] for choice in ProviderVerificationDocumentType.choices}
+        if document_type not in valid_types:
+            return Response(
+                {
+                    "success": False,
+                    "error": (
+                        f"Invalid document type '{raw_type}'. "
+                        f"Allowed: {sorted(valid_types)}."
+                    ),
+                    "code": "INVALID_DOCUMENT",
+                },
+                status=400,
+            )
+
+        uploaded_file = request.FILES.get("file")
+        if uploaded_file is None:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Verification document file is required.",
+                    "code": "INVALID_DOCUMENT",
+                },
+                status=400,
+            )
+
+        submission = ProviderVerificationSubmission.objects.create(
+            facility=membership.facility,
+            submitted_by=request.user,
+            status=ProviderVerificationStatus.PENDING,
+        )
+        ProviderVerificationDocument.objects.create(
+            submission=submission,
+            document_type=document_type,
+            file=uploaded_file,
+            original_filename=uploaded_file.name,
+            content_type=getattr(uploaded_file, "content_type", "") or "",
+            file_size=getattr(uploaded_file, "size", 0) or 0,
+            locked=True,
+        )
+
+        # TODO: send verification submission notifications via email_utils.send_email.
+        return Response(
+            {
+                "success": True,
+                "data": build_provider_verification_payload(membership.facility),
+                "message": "Verification documents submitted for review.",
+            },
+            status=201,
+        )
+
+
+class ProviderVerificationDocumentDeleteView(APIView):
+    """
+    DELETE /api/v1/provider/verification/document/<doc_type>/
+
+    Removes a single verification document (and its parent submission if it
+    becomes empty) so the frontend can roll back a failed batch upload.
+
+    Allowed when the facility has NOT yet been VERIFIED — including PENDING
+    (the document was just uploaded and an immediate rollback is needed).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def delete(self, request, doc_type):
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+
+        verification = build_provider_verification_payload(membership.facility)
+        if verification["verification_status"] == ProviderVerificationStatus.VERIFIED:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Cannot remove documents after the facility has been verified.",
+                    "code": "VERIFICATION_LOCKED",
+                },
+                status=409,
+            )
+
+        # Normalise doc_type with the same aliases as the submit view.
+        normalized = str(doc_type).upper().replace("-", "_").replace(" ", "_")
+        alias = {
+            "REG":          "REGISTRATION_CERTIFICATE",
+            "REGISTRATION": "REGISTRATION_CERTIFICATE",
+            "LICENSE":      "OPERATING_LICENSE",
+            "LICENCE":      "OPERATING_LICENSE",
+            "TAX":          "TAX_COMPLIANCE",
+            "ACCRED":       "ACCREDITATION",
+        }
+        doc_type_key = alias.get(normalized, normalized)
+
+        doc = (
+            ProviderVerificationDocument.objects
+            .filter(submission__facility=membership.facility, document_type=doc_type_key)
+            .order_by("-created_at")
+            .select_related("submission")
+            .first()
+        )
+        if doc is None:
+            return Response(
+                {"success": False, "error": "Document not found.", "code": "NOT_FOUND"},
+                status=404,
+            )
+
+        submission = doc.submission
+        # Delete the stored file from disk/storage before removing the DB row.
+        try:
+            doc.file.delete(save=False)
+        except Exception:
+            pass
+        doc.delete()
+
+        # Clean up the parent submission if it has no remaining documents.
+        if not submission.documents.exists():
+            submission.delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Document '{doc_type_key}' removed.",
+                "data": build_provider_verification_payload(membership.facility),
+            }
+        )
 
 
 class ProviderAppointmentsView(APIView):
@@ -771,91 +1142,123 @@ class ProviderAppointmentsView(APIView):
 
     def get(self, request):
         membership = ensure_provider_membership(request.user)
+        # ?bin=1 returns the recycle bin (soft-deleted only). Default excludes soft-deleted.
+        show_bin = str(request.query_params.get("bin") or "").lower() in {"1", "true", "yes"}
         queryset = ProviderAppointment.objects.select_related("provider", "patient", "facility").filter(
             facility=membership.facility
         )
+        if show_bin:
+            queryset = queryset.filter(deleted_at__isnull=False)
+        else:
+            queryset = queryset.filter(deleted_at__isnull=True)
         if membership.role == ProviderSubRole.DOCTOR and membership.provider_id:
             queryset = queryset.filter(provider=membership.provider)
         queryset = queryset.order_by("scheduled_for", "created_at")
-        return Response([build_appointment_payload(item) for item in queryset])
+        results = [build_appointment_payload(item) for item in queryset]
+
+        # Also include patient-created PatientBookings that have NO linked
+        # ProviderAppointment yet — so staff see them across ALL statuses
+        # (pending approval, rejected, confirmed, in_progress, completed).
+        # Without this, rejecting/confirming a patient-only booking would
+        # cause it to vanish from the provider list entirely.
+        linked_booking_ids = set(
+            queryset.exclude(patient_booking=None).values_list("patient_booking_id", flat=True)
+        )
+        unlinked_bookings = PatientBooking.objects.select_related(
+            "patient", "facility", "provider"
+        ).filter(
+            facility=membership.facility,
+            source="patient",
+            deleted_at__isnull=(not show_bin),
+        ).exclude(id__in=linked_booking_ids)
+        if membership.role == ProviderSubRole.DOCTOR and membership.provider_id:
+            unlinked_bookings = unlinked_bookings.filter(provider=membership.provider)
+
+        for bk in unlinked_bookings:
+            results.append(_build_patient_booking_as_appointment(bk))
+
+        # Sort combined list by scheduled_for ascending (None last)
+        results.sort(key=lambda r: (r.get("scheduled_for") or "9999", r.get("reference") or ""))
+        return Response(results)
 
     @transaction.atomic
     def post(self, request):
         membership = ensure_provider_membership(request.user)
         ensure_roles(
             membership,
-            {
-                ProviderSubRole.FACILITY_ADMIN,
-                ProviderSubRole.DOCTOR,
-                ProviderSubRole.RECEPTIONIST,
-            },
+            {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.RECEPTIONIST, ProviderSubRole.DOCTOR},
         )
-        data = request.data or {}
-        patient_id = str(data.get("patient_id") or "").strip()
-        doctor_id = str(data.get("doctor_id") or "").strip()
-        scheduled_for_raw = str(data.get("scheduled_for") or "").strip()
-        duration_minutes = int(data.get("duration_minutes") or 0)
-        appointment_type = str(data.get("appointment_type") or "In Facility").strip()
-        visit_reason = str(data.get("visit_reason") or "").strip()
-        notes = str(data.get("notes") or "").strip()
-        patient_phone = str(data.get("patient_phone") or "").strip()
 
-        if not patient_id:
-            raise ValidationError({"patient_id": "Patient is required."})
-        if not doctor_id:
-            raise ValidationError({"doctor_id": "Doctor is required."})
-        if not scheduled_for_raw:
-            raise ValidationError({"scheduled_for": "Scheduled datetime is required."})
-        if duration_minutes not in {15, 30, 45, 60}:
-            raise ValidationError(
-                {"duration_minutes": "Duration must be one of 15, 30, 45, or 60 minutes."}
-            )
-        if appointment_type not in {"In Facility", "Home Visit"}:
-            raise ValidationError(
-                {"appointment_type": "Appointment type must be In Facility or Home Visit."}
-            )
-        if not visit_reason:
-            raise ValidationError({"visit_reason": "Visit reason is required."})
+        # Doctors are locked to themselves
+        data = dict(request.data or {})
+        if membership.role == ProviderSubRole.DOCTOR and membership.provider_id:
+            uid = provider_membership_uid_for_profile(membership.provider, membership.facility)
+            if uid:
+                data.setdefault("doctor_id", uid)
 
-        scheduled_for = parse_datetime(scheduled_for_raw)
-        if scheduled_for is None:
-            raise ValidationError({"scheduled_for": "Invalid datetime format."})
-        if timezone.is_naive(scheduled_for):
-            scheduled_for = timezone.make_aware(
-                scheduled_for, timezone.get_current_timezone()
-            )
-        if scheduled_for <= timezone.now():
-            raise ValidationError(
-                {"scheduled_for": "Scheduled datetime must be in the future."}
-            )
-
-        patient = PatientProfile.objects.filter(patient_code=patient_id).first()
-        if patient is None:
-            try:
-                patient = PatientProfile.objects.get(pk=patient_id)
-            except Exception as exc:
-                raise ValidationError({"patient_id": "Patient not found."}) from exc
-
-        doctor_membership = resolve_provider_membership_for_portal_id(
-            membership.facility, doctor_id, ProviderSubRole.DOCTOR
+        source = (
+            BookingSource.DOCTOR
+            if membership.role == ProviderSubRole.DOCTOR
+            else BookingSource.PROVIDER
         )
-        if doctor_membership.provider_id is None:
-            raise ValidationError({"doctor_id": "Doctor profile is not configured."})
 
-        appointment = ProviderAppointment.objects.create(
-            appointment_ref=next_identifier(
-                ProviderAppointment, "appointment_ref", "apt-", 4
-            ),
-            provider=doctor_membership.provider,
+        appointment = ProviderAppointment(
+            appointment_ref=next_identifier(ProviderAppointment, "appointment_ref", "APT-"),
             facility=membership.facility,
-            patient=patient,
             status=WorkflowStatus.CONFIRMED,
-            scheduled_for=scheduled_for,
-            appointment_type=appointment_type,
-            patient_phone=patient_phone or patient.phone,
-            visit_reason=visit_reason,
-            notes=notes,
+            source=source,
         )
+        apply_appointment_payload(appointment, membership, data)
+        appointment.save()
+
+        # Create a linked PatientBooking so patient can see the appointment
+        if appointment.patient_id:
+            booking = PatientBooking(
+                booking_ref=next_identifier(PatientBooking, "booking_ref", "BKG-"),
+                patient=appointment.patient,
+                facility=membership.facility,
+                provider=appointment.provider,
+                status=WorkflowStatus.CONFIRMED,
+                source=source,
+                service_type="Consultation",
+                appointment_type=appointment.appointment_type or "In Facility",
+                provider_name=appointment.provider.full_name if appointment.provider else "",
+                provider_specialty=(
+                    appointment.provider.specialty or appointment.provider.facility_specialty.name
+                    if appointment.provider and appointment.provider.facility_specialty
+                    else (appointment.provider.specialty if appointment.provider else "")
+                ),
+                scheduled_for=appointment.scheduled_for,
+                notes=appointment.visit_reason or appointment.notes,
+            )
+            booking.save()
+            appointment.patient_booking = booking
+            appointment.save(update_fields=["patient_booking", "updated_at"])
+
+            # Notify the patient about this provider-created appointment
+            from portal_api.patient_booking_views import _next_notification_code
+            from core.models import PatientPortalNotification
+            creator_role = "Doctor" if source == BookingSource.DOCTOR else "Clinic staff"
+            sched_str = ""
+            if appointment.scheduled_for:
+                sched_str = appointment.scheduled_for.strftime("%a, %b %d at %I:%M %p")
+            PatientPortalNotification.objects.create(
+                notification_code=_next_notification_code(),
+                patient=appointment.patient,
+                facility=membership.facility,
+                kind="appointment",
+                title="New appointment scheduled",
+                body=(
+                    f"{creator_role} has booked an appointment for you"
+                    + (f" on {sched_str}" if sched_str else "")
+                    + f". Reference: {booking.booking_ref}."
+                ),
+                icon_lib="feather",
+                icon_name="calendar",
+                read=False,
+            )
+
+        appointment.refresh_from_db()
         return Response(build_appointment_payload(appointment), status=201)
 
 
@@ -871,40 +1274,122 @@ class ProviderAppointmentDetailView(APIView):
         )
         appointment = get_appointment_or_raise(membership.facility, appointment_ref)
         data = request.data or {}
-        previous_status = appointment.status
-
-        if "doctor_id" in data:
-            doctor_id = str(data.get("doctor_id") or "").strip()
-            if not doctor_id:
-                appointment.provider = None
-            else:
-                doctor_membership = resolve_provider_membership_for_portal_id(
-                    membership.facility, doctor_id, ProviderSubRole.DOCTOR
-                )
-                appointment.provider = doctor_membership.provider
-
-        if "status" in data:
-            requested_status = str(data.get("status") or "").strip()
-            status_map = {
-                "confirmed": WorkflowStatus.CONFIRMED,
-                "cancelled": WorkflowStatus.CANCELLED,
-                "rejected": WorkflowStatus.CANCELLED,
-                "unassigned": WorkflowStatus.DRAFT,
-                "pending": WorkflowStatus.DRAFT,
-            }
-            appointment.status = status_map.get(requested_status, appointment.status)
-
-        appointment.save(update_fields=["provider", "status", "updated_at"])
-        if previous_status != appointment.status:
-            actor_label = request.user.get_full_name().strip() or request.user.email
-            if requested_status == "rejected":
-                _notify_patient_for_provider_appointment(appointment, "rejected", actor_label)
-            elif appointment.status == WorkflowStatus.CANCELLED:
-                _notify_patient_for_provider_appointment(appointment, "cancelled", actor_label)
-            elif appointment.status == WorkflowStatus.CONFIRMED:
-                _notify_patient_for_provider_appointment(appointment, "approved", actor_label)
+        apply_appointment_payload(appointment, membership, data)
+        appointment.save()
         appointment.refresh_from_db()
         return Response(build_appointment_payload(appointment))
+
+    @transaction.atomic
+    def delete(self, request, appointment_ref):
+        # NOTE: this is a SOFT delete. The appointment is moved to the
+        # recycle bin (deleted_at = now). Hard delete only happens via the
+        # purge_recycle_bin management command after 90 days.
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(
+            membership,
+            {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.RECEPTIONIST},
+        )
+        now = timezone.now()
+        appointment = ProviderAppointment.objects.select_related("patient_booking").filter(
+            facility=membership.facility,
+            appointment_ref=appointment_ref,
+        ).first()
+        if appointment is not None:
+            appointment.deleted_at = now
+            appointment.notes = (appointment.notes or "") + (
+                f"\nDELETE|by={request.user.email or request.user.get_username()}|at={now.isoformat()}"
+            )
+            appointment.save(update_fields=["deleted_at", "notes", "updated_at"])
+            # Also soft-delete the linked PatientBooking so the patient stops
+            # seeing it (they can ask to restore via support).
+            if appointment.patient_booking_id:
+                booking = appointment.patient_booking
+                booking.deleted_at = now
+                booking.save(update_fields=["deleted_at", "updated_at"])
+            response_payload = build_appointment_payload(appointment)
+            reference_for_log = appointment.appointment_ref
+        else:
+            booking = PatientBooking.objects.select_related("patient", "facility", "provider").filter(
+                facility=membership.facility,
+                booking_ref=appointment_ref,
+            ).first()
+            if booking is None:
+                raise NotFound("Appointment not found.")
+            booking.deleted_at = now
+            booking.notes = (booking.notes or "") + (
+                f"\nDELETE|by={request.user.email or request.user.get_username()}|at={now.isoformat()}"
+            )
+            booking.save(update_fields=["deleted_at", "notes", "updated_at"])
+            response_payload = _build_patient_booking_as_appointment(booking)
+            reference_for_log = booking.booking_ref
+        log_provider_activity(
+            request.user,
+            membership,
+            {
+                "module": "Appointments",
+                "action": "appointment_soft_deleted",
+                "detail": f"reference={reference_for_log}",
+                "type": "appointments",
+            },
+        )
+        return Response(response_payload)
+
+
+class ProviderAppointmentRestoreView(APIView):
+    """POST /api/v1/provider/appointments/<ref>/restore/ — bring back from recycle bin."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, appointment_ref):
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(
+            membership,
+            {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.RECEPTIONIST},
+        )
+        appointment = ProviderAppointment.objects.select_related("patient_booking").filter(
+            facility=membership.facility, appointment_ref=appointment_ref,
+        ).first()
+        if appointment is not None:
+            if appointment.deleted_at is None:
+                raise NotFound("Appointment is not in the recycle bin.")
+            appointment.deleted_at = None
+            appointment.notes = (appointment.notes or "") + (
+                f"\nRESTORE|by={request.user.email or request.user.get_username()}"
+                f"|at={timezone.now().isoformat()}"
+            )
+            appointment.save(update_fields=["deleted_at", "notes", "updated_at"])
+            if appointment.patient_booking_id:
+                booking = appointment.patient_booking
+                booking.deleted_at = None
+                booking.save(update_fields=["deleted_at", "updated_at"])
+            response_payload = build_appointment_payload(appointment)
+            reference_for_log = appointment.appointment_ref
+        else:
+            booking = PatientBooking.objects.select_related("patient", "facility", "provider").filter(
+                facility=membership.facility,
+                booking_ref=appointment_ref,
+            ).first()
+            if booking is None or booking.deleted_at is None:
+                raise NotFound("Appointment is not in the recycle bin.")
+            booking.deleted_at = None
+            booking.notes = (booking.notes or "") + (
+                f"\nRESTORE|by={request.user.email or request.user.get_username()}"
+                f"|at={timezone.now().isoformat()}"
+            )
+            booking.save(update_fields=["deleted_at", "notes", "updated_at"])
+            response_payload = _build_patient_booking_as_appointment(booking)
+            reference_for_log = booking.booking_ref
+        log_provider_activity(
+            request.user,
+            membership,
+            {
+                "module": "Appointments",
+                "action": "appointment_restored",
+                "detail": f"reference={reference_for_log}",
+                "type": "appointments",
+            },
+        )
+        return Response(response_payload)
 
 
 class ProviderPatientsView(APIView):
@@ -994,106 +1479,6 @@ class ProviderPatientsView(APIView):
             )
         payload.sort(key=lambda row: row["name"])
         return Response(payload)
-
-
-def _facility_booking_search_patient_ids(membership):
-    """Patients linked to this facility (access + clinical records)."""
-    facility = membership.facility
-    ids = set(
-        PatientFacilityAccess.objects.filter(facility=facility, is_active=True).values_list(
-            "patient_id", flat=True
-        )
-    )
-    ids.update(
-        ProviderAppointment.objects.filter(facility=facility, patient_id__isnull=False).values_list(
-            "patient_id", flat=True
-        )
-    )
-    ids.update(
-        ProviderConsultation.objects.filter(facility=facility, patient_id__isnull=False).values_list(
-            "patient_id", flat=True
-        )
-    )
-    ids.update(
-        ProviderPrescriptionTask.objects.filter(facility=facility, patient_id__isnull=False).values_list(
-            "patient_id", flat=True
-        )
-    )
-    # EMR parity: doctors only see patients they have touched at this facility.
-    if membership.role == ProviderSubRole.DOCTOR and membership.provider_id:
-        panel = set()
-        panel.update(
-            ProviderAppointment.objects.filter(
-                facility=facility, provider=membership.provider, patient_id__isnull=False
-            ).values_list("patient_id", flat=True)
-        )
-        panel.update(
-            ProviderConsultation.objects.filter(
-                facility=facility, provider=membership.provider, patient_id__isnull=False
-            ).values_list("patient_id", flat=True)
-        )
-        panel.update(
-            ProviderPrescriptionTask.objects.filter(
-                facility=facility, provider=membership.provider, patient_id__isnull=False
-            ).values_list("patient_id", flat=True)
-        )
-        ids &= panel
-    return ids
-
-
-class ProviderPatientSearchView(APIView):
-    """Minimal patient lookup for booking (not full EMR)."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        membership = ensure_provider_membership(request.user)
-        ensure_roles(
-            membership,
-            {
-                ProviderSubRole.FACILITY_ADMIN,
-                ProviderSubRole.DOCTOR,
-                ProviderSubRole.RECEPTIONIST,
-            },
-        )
-        q = (request.GET.get("q") or "").strip()
-        if len(q) < 2:
-            return Response({"results": []})
-
-        patient_ids = _facility_booking_search_patient_ids(membership)
-        if not patient_ids:
-            return Response({"results": []})
-
-        try:
-            uuid.UUID(q)
-            uuid_ok = True
-        except (ValueError, TypeError):
-            uuid_ok = False
-
-        name_or_code = (
-            Q(full_name__icontains=q)
-            | Q(patient_code__icontains=q)
-            | Q(phone__icontains=q)
-        )
-        filters = name_or_code | Q(pk=q) if uuid_ok else name_or_code
-
-        rows = (
-            PatientProfile.objects.filter(pk__in=patient_ids)
-            .filter(filters)
-            .order_by("full_name")[:25]
-        )
-        return Response(
-            {
-                "results": [
-                    {
-                        "id": p.patient_code,
-                        "name": p.full_name,
-                        "phone": p.phone or "",
-                    }
-                    for p in rows
-                ]
-            }
-        )
 
 
 class ProviderLabResultsView(APIView):
@@ -1379,7 +1764,7 @@ class ProviderBillingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        membership = ensure_provider_membership(request.user)
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
         ensure_roles(
             membership,
             {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.BILLING_MANAGER},
@@ -1392,7 +1777,7 @@ class ProviderBillingPayView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, billing_code):
-        membership = ensure_provider_membership(request.user)
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
         ensure_roles(
             membership,
             {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.BILLING_MANAGER},
@@ -1413,7 +1798,7 @@ class ProviderNotificationsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        ensure_provider_membership(request.user)
+        ensure_provider_membership(request.user, enforce_verification=False)
         queryset = ProviderPortalNotification.objects.filter(user=request.user).order_by("-created_at")
         return Response([build_notification_payload(item) for item in queryset])
 
@@ -1422,7 +1807,7 @@ class ProviderNotificationReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, notification_code):
-        ensure_provider_membership(request.user)
+        ensure_provider_membership(request.user, enforce_verification=False)
         notification = get_notification_or_raise(request.user, notification_code)
         notification.read = True
         notification.save(update_fields=["read", "updated_at"])
@@ -1433,7 +1818,7 @@ class ProviderNotificationReadAllView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        ensure_provider_membership(request.user)
+        ensure_provider_membership(request.user, enforce_verification=False)
         ProviderPortalNotification.objects.filter(user=request.user, read=False).update(
             read=True, updated_at=timezone.now()
         )
@@ -1444,7 +1829,7 @@ class ProviderAvailabilityView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        membership = ensure_provider_membership(request.user)
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
         ensure_roles(
             membership,
             {
@@ -1475,7 +1860,7 @@ class ProviderAvailabilityView(APIView):
         return Response(payload)
 
     def post(self, request):
-        membership = ensure_provider_membership(request.user)
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
         ensure_roles(
             membership,
             {
@@ -1494,12 +1879,65 @@ class ProviderAvailabilityView(APIView):
             facility=membership.facility,
             defaults={"slots": [], "blocked_days": []},
         )
+
+        from portal_api.patient_booking_views import _normalize_type
+        day = (slot.get("day") or "").strip()
+        start = (slot.get("start") or "").strip()
+        end = (slot.get("end") or "").strip()
+        # Always store the normalized type so filters always match.
+        slot_type = _normalize_type(slot.get("type") or "in_facility") or "in_facility"
+
+        if not day:
+            raise ValidationError({"day": "Day is required."})
+        if not start or not end:
+            raise ValidationError({"time": "Both start and end times are required."})
+
+        # 1. Block on blocked-day — must unblock first
+        if day in (availability.blocked_days or []):
+            raise ValidationError({"day": f"{day} is currently blocked. Unblock the day before adding slots."})
+
+        # 2. Validate HH:MM format and 30-min boundaries
+        def _to_minutes(s):
+            try:
+                h, m = [int(x) for x in s.split(":")[:2]]
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    return h * 60 + m
+            except (ValueError, IndexError):
+                pass
+            return None
+
+        s_min = _to_minutes(start)
+        e_min = _to_minutes(end)
+        if s_min is None or e_min is None:
+            raise ValidationError({"time": "Use HH:MM format, e.g. 09:00."})
+        if e_min - s_min < 30:
+            raise ValidationError({"time": "Slot must be at least 30 minutes long."})
+        if (s_min % 30) != 0 or (e_min % 30) != 0:
+            raise ValidationError({"time": "Use 30-minute boundaries (e.g. 09:00, 09:30)."})
+
+        # 3. Overlap check — slots on the same day cannot overlap, even if types differ.
+        for existing in (availability.slots or []):
+            if (existing.get("day") or "") != day:
+                continue
+            ex_s = _to_minutes(existing.get("start") or "")
+            ex_e = _to_minutes(existing.get("end") or "")
+            if ex_s is None or ex_e is None:
+                continue
+            # Overlap if [s_min, e_min) intersects [ex_s, ex_e)
+            if s_min < ex_e and ex_s < e_min:
+                raise ValidationError({
+                    "time": (
+                        f"Overlaps an existing {existing.get('type','slot')} slot "
+                        f"({existing.get('start','?')}–{existing.get('end','?')}) on {day}."
+                    )
+                })
+
         new_slot = {
             "id": f"sl-{timezone.now().strftime('%Y%m%d%H%M%S%f')}",
-            "day": slot.get("day") or "",
-            "start": slot.get("start") or "",
-            "end": slot.get("end") or "",
-            "type": slot.get("type") or "In Facility",
+            "day": day,
+            "start": start,
+            "end": end,
+            "type": slot_type,
             "setBy": slot.get("setBy")
             or ("self" if membership.role == ProviderSubRole.DOCTOR else "receptionist"),
         }
@@ -1580,121 +2018,6 @@ class ProviderActivityLogView(APIView):
         return Response(build_activity_log_payload(log_entry), status=201)
 
 
-class ProviderPatientInviteView(APIView):
-    """Invite a patient portal user linked to this facility (not provider staff)."""
-
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request):
-        membership = ensure_provider_membership(request.user)
-        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
-        data = request.data or {}
-        email = str(data.get("email") or "").strip().lower()[:254]
-        first_name = str(data.get("first_name") or "").strip()[:80]
-        last_name = str(data.get("last_name") or "").strip()[:80]
-        phone = str(data.get("phone") or "").strip()[:32]
-        dob_raw = str(data.get("date_of_birth") or "").strip()
-        gender = str(data.get("gender") or "").strip()[:20]
-        emergency_phone = str(data.get("emergency_contact_phone") or "").strip()[:32]
-        if not email:
-            raise ValidationError({"email": "Email is required."})
-        if not first_name:
-            raise ValidationError({"first_name": "First name is required."})
-        if not dob_raw:
-            raise ValidationError({"date_of_birth": "Date of birth is required for patient accounts."})
-        parsed_dob = parse_date(dob_raw)
-        if parsed_dob is None:
-            raise ValidationError({"date_of_birth": "Use YYYY-MM-DD format."})
-
-        if ProviderMembership.objects.filter(
-            user__email__iexact=email, facility=membership.facility, is_active=True
-        ).exists():
-            raise ValidationError(
-                {"email": "This email already belongs to a staff member at your facility."}
-            )
-
-        user_model = get_user_model()
-        temp_pw = _temporary_portal_password()
-        user = user_model.objects.filter(email__iexact=email).first()
-
-        if user and PatientUserLink.objects.filter(user=user).exists():
-            link = PatientUserLink.objects.select_related("patient").get(user=user)
-            patient = link.patient
-            patient.full_name = f"{first_name} {last_name}".strip() or patient.full_name
-            patient.phone = phone or patient.phone
-            patient.date_of_birth = parsed_dob
-            if gender:
-                patient.gender = gender
-            if emergency_phone:
-                patient.emergency_contact_phone = emergency_phone
-            patient.save(
-                update_fields=[
-                    "full_name",
-                    "phone",
-                    "date_of_birth",
-                    "gender",
-                    "emergency_contact_phone",
-                    "updated_at",
-                ]
-            )
-            user.first_name = first_name
-            user.last_name = last_name
-            user.set_password(temp_pw)
-            user.save(update_fields=["first_name", "last_name", "password"])
-        elif user is None:
-            user = user_model.objects.create_user(
-                username=build_unique_username(email),
-                email=email,
-                password=temp_pw,
-                first_name=first_name,
-                last_name=last_name,
-                is_staff=False,
-                is_active=True,
-            )
-            patient = PatientProfile.objects.create(
-                patient_code=next_identifier(PatientProfile, "patient_code", "PAT-", 4),
-                full_name=f"{first_name} {last_name}".strip(),
-                status=WorkflowStatus.CONFIRMED,
-                phone=phone,
-                email=email,
-                date_of_birth=parsed_dob,
-                gender=gender,
-                emergency_contact_phone=emergency_phone,
-            )
-            PatientUserLink.objects.create(
-                user=user,
-                patient=patient,
-                default_facility=membership.facility,
-                is_active=True,
-            )
-        else:
-            raise ValidationError(
-                {"email": "This email is already registered to a non-patient account."}
-            )
-
-        access, _created_acc = PatientFacilityAccess.objects.get_or_create(
-            patient=patient,
-            facility=membership.facility,
-            defaults={"is_default": True, "is_active": True},
-        )
-        if not access.is_active:
-            access.is_active = True
-            access.save(update_fields=["is_active", "updated_at"])
-
-        login_hint = _patient_login_url_hint()
-        return Response(
-            {
-                "patient_invite": True,
-                "patient_code": patient.patient_code,
-                "email": email,
-                "temporary_password": temp_pw,
-                "login_url": login_hint,
-            },
-            status=201,
-        )
-
-
 class ProviderStaffView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1724,52 +2047,53 @@ class ProviderStaffView(APIView):
             ProviderSubRole.RECEPTIONIST,
         }:
             raise ValidationError({"role": "A valid staff role is required."})
-        email = str(data.get("email") or "").strip().lower()[:254]
+        email = str(data.get("email") or "").strip().lower()
         if not email:
             raise ValidationError({"email": "Email is required."})
-        first_name = str(data.get("first_name") or "").strip()[:80]
+        first_name = str(data.get("first_name") or "").strip()
         if not first_name:
             raise ValidationError({"first_name": "First name is required."})
-        last_name = str(data.get("last_name") or "").strip()[:80]
-        phone = str(data.get("phone") or "").strip()[:32]
-        specialty = str(data.get("specialty") or "").strip()[:120]
-        license_number = str(data.get("license") or "").strip()[:80]
-        professional_notes = str(data.get("professional_notes") or "").strip()[:500]
-
-        if role == ProviderSubRole.DOCTOR:
-            if len(specialty) < 2:
-                raise ValidationError({"specialty": "Specialty is required for doctors."})
-            if len(license_number) < 3:
-                raise ValidationError({"license": "A valid professional licence number is required for doctors."})
-
-        if PatientUserLink.objects.filter(user__email__iexact=email).exists():
-            raise ValidationError(
-                {"email": "This email is already a patient portal account. Use patient invite instead."}
-            )
-
+        last_name = str(data.get("last_name") or "").strip()
         user_model = get_user_model()
         user = user_model.objects.filter(email__iexact=email).first()
-        created_fresh_user = user is None
-        invitation_password = None
+        # Generate a one-time password for new accounts. Returned in the
+        # response so the facility admin can copy it / share with the staff
+        # member. The user can reset it later via the dedicated endpoint.
+        from django.utils.crypto import get_random_string
+        generated_password = None
         if user is None:
-            invitation_password = _temporary_portal_password()
+            # Mix upper, lower, digits, and a stable trailing symbol so the
+            # password meets typical complexity rules without being painful.
+            base = get_random_string(10, allowed_chars="ABCDEFGHJKLMNPQRSTUVWXYZ"
+                                                       "abcdefghijkmnopqrstuvwxyz"
+                                                       "23456789")
+            generated_password = f"{base}@1"
             user = user_model.objects.create_user(
                 username=build_unique_username(email),
                 email=email,
-                password=invitation_password,
+                password=generated_password,
                 first_name=first_name,
                 last_name=last_name,
                 is_staff=True,
                 is_active=True,
             )
         else:
-            if PatientUserLink.objects.filter(user=user).exists():
-                raise ValidationError({"email": "This email belongs to a patient account."})
             user.first_name = first_name
             user.last_name = last_name
             user.is_staff = True
             user.is_active = True
             user.save(update_fields=["first_name", "last_name", "is_staff", "is_active"])
+
+        license_val = (
+            str(data.get("license") or "").strip()
+            if role == ProviderSubRole.DOCTOR
+            else ""
+        )
+        doctor_fs, doctor_spec = None, ""
+        if role == ProviderSubRole.DOCTOR:
+            doctor_fs, doctor_spec = resolve_staff_doctor_specialty(
+                membership.facility, data, allow_empty=False
+            )
 
         provider_id = (
             ProviderMembership.objects.filter(user=user, provider__isnull=False)
@@ -1780,34 +2104,41 @@ class ProviderStaffView(APIView):
             provider = ProviderProfile.objects.get(pk=provider_id)
             provider.full_name = f"{first_name} {last_name}".strip()
             provider.status = WorkflowStatus.CONFIRMED
-            provider.phone = phone
+            provider.phone = str(data.get("phone") or "").strip()
             provider.email = email
-            update_fields = [
-                "full_name",
-                "status",
-                "phone",
-                "email",
-                "updated_at",
-            ]
             if role == ProviderSubRole.DOCTOR:
-                provider.specialty = specialty
-                provider.license_number = license_number
-                update_fields.extend(["specialty", "license_number"])
-            if professional_notes:
-                provider.bio = professional_notes
-                update_fields.append("bio")
-            provider.save(update_fields=update_fields)
+                provider.facility_specialty = doctor_fs
+                provider.specialty = doctor_spec
+            elif "specialty" in data:
+                provider.specialty = str(data.get("specialty") or "").strip()
+                provider.facility_specialty = None
+            if role == ProviderSubRole.DOCTOR or "license" in data:
+                provider.license_number = license_val or str(
+                    data.get("license") or ""
+                ).strip()
+            provider.save(
+                update_fields=[
+                    "full_name",
+                    "specialty",
+                    "facility_specialty",
+                    "status",
+                    "phone",
+                    "email",
+                    "license_number",
+                    "updated_at",
+                ]
+            )
         else:
             provider = ProviderProfile.objects.create(
                 provider_code=next_identifier(ProviderProfile, "provider_code", "PRV-", 4),
                 facility=membership.facility,
                 full_name=f"{first_name} {last_name}".strip(),
-                specialty=specialty if role == ProviderSubRole.DOCTOR else "",
+                facility_specialty=doctor_fs if role == ProviderSubRole.DOCTOR else None,
+                specialty=doctor_spec if role == ProviderSubRole.DOCTOR else "",
                 status=WorkflowStatus.CONFIRMED,
-                phone=phone,
+                phone=str(data.get("phone") or "").strip(),
                 email=email,
-                license_number=license_number if role == ProviderSubRole.DOCTOR else "",
-                bio=professional_notes if professional_notes else "",
+                license_number=license_val,
             )
 
         new_membership, created = ProviderMembership.objects.get_or_create(
@@ -1830,12 +2161,47 @@ class ProviderStaffView(APIView):
         user.is_staff = True
         user.save(update_fields=["is_active", "is_staff"])
         payload = build_staff_payload(new_membership)
-        if created_fresh_user and invitation_password:
-            payload["invitation"] = {
-                "temporary_password": invitation_password,
-                "login_url": _portal_login_url_hint(),
-            }
+        # Surface the one-time password ONLY when we just created the user.
+        # The caller (facility admin) is expected to copy it and hand it to
+        # the new staff member; it is never re-served on subsequent reads.
+        if generated_password:
+            payload["temporary_password"] = generated_password
+            payload["password_note"] = (
+                "Copy this temporary password now — it will not be shown again. "
+                "Ask the staff member to sign in and change it from their profile."
+            )
         return Response(payload, status=201)
+
+
+class ProviderStaffResetPasswordView(APIView):
+    """
+    POST /api/v1/provider/staff/<staff_id>/reset-password/
+    Facility admin generates a new one-time password for a staff member.
+    Returns the new password ONCE — admin must copy it.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, staff_id):
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+        staff_membership = get_staff_membership_or_raise(membership.facility, staff_id)
+
+        from django.utils.crypto import get_random_string
+        base = get_random_string(10, allowed_chars="ABCDEFGHJKLMNPQRSTUVWXYZ"
+                                                   "abcdefghijkmnopqrstuvwxyz"
+                                                   "23456789")
+        new_password = f"{base}@1"
+        staff_membership.user.set_password(new_password)
+        staff_membership.user.is_active = True
+        staff_membership.user.save(update_fields=["password", "is_active"])
+
+        payload = build_staff_payload(staff_membership)
+        payload["temporary_password"] = new_password
+        payload["password_note"] = (
+            "Copy this password now — it will not be shown again. The staff "
+            "member should sign in and change it from their profile."
+        )
+        return Response(payload, status=200)
 
 
 class ProviderStaffDetailView(APIView):
@@ -1851,20 +2217,44 @@ class ProviderStaffDetailView(APIView):
             staff_membership.user.first_name = str(data.get("first_name") or "").strip()
         if "last_name" in data:
             staff_membership.user.last_name = str(data.get("last_name") or "").strip()
-        if ("phone" in data or "specialty" in data) and not staff_membership.provider_id:
+        if (
+            "phone" in data
+            or "specialty" in data
+            or "facility_specialty_id" in data
+            or "new_specialty_name" in data
+        ) and not staff_membership.provider_id:
             staff_membership = ProviderMembership.objects.select_related(
                 "user", "provider", "facility"
             ).get(pk=staff_membership.pk)
             ensure_membership_profile(staff_membership)
         if "phone" in data and staff_membership.provider:
             staff_membership.provider.phone = str(data.get("phone") or "").strip()
-        if "specialty" in data and staff_membership.provider:
+        if staff_membership.provider and staff_membership.role == ProviderSubRole.DOCTOR:
+            if (
+                "facility_specialty_id" in data
+                or "new_specialty_name" in data
+                or "specialty" in data
+            ):
+                fs, nm = resolve_staff_doctor_specialty(
+                    membership.facility, data, allow_empty=True
+                )
+                staff_membership.provider.facility_specialty = fs
+                staff_membership.provider.specialty = nm
+        elif "specialty" in data and staff_membership.provider:
             staff_membership.provider.specialty = str(data.get("specialty") or "").strip()
+            staff_membership.provider.facility_specialty = None
 
         staff_membership.user.save(update_fields=["first_name", "last_name"])
         if staff_membership.provider:
             staff_membership.provider.full_name = staff_membership.user.get_full_name().strip()
-            staff_membership.provider.save(update_fields=["full_name", "phone", "specialty"])
+            staff_membership.provider.save(
+                update_fields=[
+                    "full_name",
+                    "phone",
+                    "specialty",
+                    "facility_specialty",
+                ]
+            )
         staff_membership.refresh_from_db()
         return Response(build_staff_payload(staff_membership))
 
@@ -1935,11 +2325,63 @@ class ProviderConsultationsView(APIView):
             patient = PatientProfile.objects.filter(full_name__iexact=patient_name).first()
         if patient is None:
             raise ValidationError({"patient_id": "Patient not found."})
+
+        # ── EMR edit gate ──────────────────────────────────────────────────────
+        # A consultation can only be created when:
+        #   (a) the patient has an IN_PROGRESS appointment at this facility, OR
+        #   (b) this is the patient's FIRST consultation here (no prior records),
+        # AND the doctor calling this endpoint is the one assigned to the
+        # in-progress appointment (or a facility admin override).
+        # The allowed grace window after scheduled_for is the admin-configured
+        # ProviderClinicalSetting.edit_window_hours (default 24).
+        edit_window_hours = (
+            ProviderClinicalSetting.objects.filter(facility=membership.facility)
+            .values_list("edit_window_hours", flat=True)
+            .first()
+            or 24
+        )
+        now = timezone.now()
+        edit_window_start = now - timedelta(hours=edit_window_hours)
+
+        has_prior_consultation = ProviderConsultation.objects.filter(
+            patient=patient, facility=membership.facility
+        ).exists()
+
+        appt_qs = ProviderAppointment.objects.filter(
+            facility=membership.facility,
+            patient=patient,
+        )
+        if membership.role == ProviderSubRole.DOCTOR and membership.provider_id:
+            appt_qs = appt_qs.filter(provider_id=membership.provider_id)
+
+        active_appt = appt_qs.filter(
+            status=WorkflowStatus.IN_PROGRESS,
+        ).first()
+        recent_appt = appt_qs.filter(
+            status__in=[WorkflowStatus.IN_PROGRESS, WorkflowStatus.COMPLETED],
+            scheduled_for__gte=edit_window_start,
+        ).order_by("-scheduled_for").first()
+
+        if not active_appt and not recent_appt:
+            # First-consult exception — only when patient has zero records
+            # and the booker is a facility admin who can override.
+            is_admin = membership.role == ProviderSubRole.FACILITY_ADMIN
+            if not (is_admin and not has_prior_consultation):
+                raise ValidationError({
+                    "detail": (
+                        "EMR can only be edited during an active consultation "
+                        f"or within {edit_window_hours} hours of one. Start a "
+                        "consultation from the Appointments tab first."
+                    ),
+                    "code": "EMR_EDIT_LOCKED",
+                })
+
         consultation = ProviderConsultation.objects.create(
             consultation_ref=next_identifier(ProviderConsultation, "consultation_ref", "con-", 4),
             provider=membership.provider,
             patient=patient,
             facility=membership.facility,
+            appointment=active_appt or recent_appt,
             status=WorkflowStatus.CONFIRMED,
             consultation_type=str(data.get("type") or "In Facility").strip(),
             subjective=str(data.get("subjective") or "").strip(),
@@ -1947,7 +2389,7 @@ class ProviderConsultationsView(APIView):
             assessment=str(data.get("assessment") or "").strip(),
             plan=str(data.get("plan") or "").strip(),
             uploaded_files=data.get("uploaded_files") or [],
-            consulted_at=timezone.now(),
+            consulted_at=now,
         )
         return Response(build_consultation_payload(consultation), status=201)
 
@@ -2013,13 +2455,6 @@ class ProviderClinicalSettingsView(APIView):
             facility=membership.facility, defaults={"edit_window_hours": 24}
         )
         data = request.data or {}
-        before = {
-            "edit_window_hours": settings_obj.edit_window_hours,
-            "push_notifications": settings_obj.push_notifications,
-            "critical_lab_alerts": settings_obj.critical_lab_alerts,
-            "email_reports": settings_obj.email_reports,
-            "two_factor_enabled": settings_obj.two_factor_enabled,
-        }
         updated_fields = ["updated_at"]
         if "edit_window_hours" in data:
             value = int(data.get("edit_window_hours") or 0)
@@ -2037,16 +2472,6 @@ class ProviderClinicalSettingsView(APIView):
                 setattr(settings_obj, field_name, coerce_bool(data.get(field_name)))
                 updated_fields.append(field_name)
         settings_obj.save(update_fields=updated_fields)
-        change_bits = []
-        if before["edit_window_hours"] != settings_obj.edit_window_hours:
-            change_bits.append(f"edit window {before['edit_window_hours']}→{settings_obj.edit_window_hours}h")
-        for key in ("push_notifications", "critical_lab_alerts", "email_reports", "two_factor_enabled"):
-            if before[key] != getattr(settings_obj, key):
-                change_bits.append(f"{key} {before[key]}→{getattr(settings_obj, key)}")
-        if change_bits:
-            _notify_clinical_settings_recipients(
-                membership.facility, request.user, "; ".join(change_bits)
-            )
         return Response(
             {
                 "edit_window_hours": settings_obj.edit_window_hours,
@@ -2291,10 +2716,17 @@ class ProviderAnalyticsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        membership = ensure_provider_membership(request.user)
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
         ensure_roles(
             membership,
-            {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.BILLING_MANAGER},
+            {
+                ProviderSubRole.FACILITY_ADMIN,
+                ProviderSubRole.BILLING_MANAGER,
+                ProviderSubRole.DOCTOR,
+                ProviderSubRole.RECEPTIONIST,
+                ProviderSubRole.LAB_MANAGER,
+                ProviderSubRole.POS,
+            },
         )
         billing = list(ProviderBillingRecord.objects.filter(facility=membership.facility).order_by("billed_on"))
         inventory = list(ProviderInventoryItem.objects.filter(facility=membership.facility, active=True))
@@ -2377,3 +2809,158 @@ class ProviderAnalyticsView(APIView):
             }
         )
 
+
+# ─── Views added back from our patched version (missing from v2) ──────────────
+
+
+class ProviderChangePasswordView(APIView):
+    """Allow a provider to change their own password."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
+        data = request.data or {}
+        current_password = str(data.get("current_password") or "").strip()
+        new_password = str(data.get("new_password") or "").strip()
+
+        if not current_password or not new_password:
+            raise ValidationError({"detail": "current_password and new_password are required."})
+        if len(new_password) < 6:
+            raise ValidationError({"new_password": "Password must be at least 6 characters."})
+
+        user = membership.user
+        if not user.check_password(current_password):
+            raise ValidationError({"current_password": "Current password is incorrect."})
+
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+        return Response({"detail": "Password updated successfully."})
+
+
+class ProviderPatientInviteView(APIView):
+    """
+    Invite a patient to the portal by creating a PatientProfile + PatientUserLink
+    for an existing patient record, then sending them a registration link.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        from django.contrib.auth import get_user_model
+        from core.models import (
+            PatientFacilityAccess, PatientProfile,
+            PatientUserLink, WorkflowStatus,
+        )
+        from portal_api.utils import build_patient_payload
+
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.RECEPTIONIST})
+
+        data = request.data or {}
+        email = str(data.get("email") or "").strip().lower()
+        first_name = str(data.get("first_name") or "").strip()
+        last_name = str(data.get("last_name") or "").strip()
+        phone = str(data.get("phone") or "").strip()
+        patient_code = str(data.get("patient_code") or "").strip()
+
+        if not email:
+            raise ValidationError({"email": "Email is required."})
+        if not first_name:
+            raise ValidationError({"first_name": "First name is required."})
+        if not last_name:
+            raise ValidationError({"last_name": "Last name is required."})
+
+        user_model = get_user_model()
+
+        # Find or create the Django user
+        user = user_model.objects.filter(email__iexact=email).first()
+        if user is None:
+            temp_password = next_identifier(PatientProfile, "patient_code", "tmp-", 6)
+            user = user_model.objects.create_user(
+                username=build_unique_username(email),
+                email=email,
+                password=temp_password,
+                first_name=first_name,
+                last_name=last_name,
+                is_staff=False,
+                is_active=True,
+            )
+
+        # Find or create the PatientProfile
+        if patient_code:
+            patient = PatientProfile.objects.filter(patient_code=patient_code).first()
+        else:
+            patient = PatientProfile.objects.filter(email__iexact=email).first()
+
+        if patient is None:
+            patient = PatientProfile.objects.create(
+                patient_code=next_identifier(PatientProfile, "patient_code", "PAT-", 4),
+                full_name=f"{first_name} {last_name}".strip(),
+                status=WorkflowStatus.CONFIRMED,
+                phone=phone,
+                email=email,
+                preferred_language="en",
+            )
+
+        # Link user to patient
+        link, _ = PatientUserLink.objects.get_or_create(
+            user=user,
+            defaults={"patient": patient, "default_facility": membership.facility, "is_active": True},
+        )
+
+        # Grant facility access
+        PatientFacilityAccess.objects.get_or_create(
+            patient=patient,
+            facility=membership.facility,
+            defaults={"is_default": True, "is_active": True},
+        )
+
+        from django.conf import settings
+        login_url = getattr(settings, "GONEP_PATIENT_LOGIN_URL", "")
+        return Response({
+            "detail": f"Patient {email} has been invited.",
+            "login_url": login_url,
+            "patient_code": patient.patient_code,
+        }, status=201)
+
+
+class ProviderPatientSearchView(APIView):
+    """
+    Quick patient search within the provider's facility.
+    Query param: ?q=<name or code or phone>
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Q
+        from core.models import PatientProfile
+
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN, ProviderSubRole.DOCTOR, ProviderSubRole.RECEPTIONIST})
+
+        q = str(request.query_params.get("q") or "").strip()
+        if not q:
+            return Response([])
+
+        queryset = PatientProfile.objects.filter(
+            facility_access__facility=membership.facility,
+            facility_access__is_active=True,
+        ).filter(
+            Q(full_name__icontains=q)
+            | Q(patient_code__icontains=q)
+            | Q(phone__icontains=q)
+            | Q(email__icontains=q)
+        ).distinct()[:20]
+
+        return Response([
+            {
+                "patient_code": p.patient_code,
+                "full_name": p.full_name,
+                "phone": p.phone,
+                "email": p.email,
+                "blood_group": p.blood_group,
+                "age": calculate_age(p.date_of_birth) if p.date_of_birth else None,
+            }
+            for p in queryset
+        ])

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
+import { T } from '../../../atoms/T';
 import { Card } from '../../../atoms/Card';
 import { Btn } from '../../../atoms/Btn';
 import { Avatar } from '../../../atoms/Avatar';
@@ -51,16 +52,16 @@ export function ProfileScreen({ user, onUpdateUser }) {
       {/* Hero card */}
       <Card style={[styles.heroCard, { borderColor: C.border }]}>
         <Avatar name={`${user.first_name} ${user.last_name}`} size={72} />
-        <Text style={[styles.name, { color: C.text }]}>{user.first_name} {user.last_name}</Text>
-        <Text style={[styles.email, { color: C.textMuted }]}>{user.email}</Text>
+        <T style={[styles.name, { color: C.text }]}>{user.first_name} {user.last_name}</T>
+        <T style={[styles.email, { color: C.textMuted }]}>{user.email}</T>
         <View style={styles.badgeRow}>
           <View style={[styles.rolePill, { backgroundColor: `${roleColor}18` }]}>
-            <Text style={{ color: roleColor, fontSize: 12, fontWeight: '700' }}>{ROLE_LABELS[user.role]}</Text>
+            <T style={{ color: roleColor, fontSize: 12, fontWeight: '700' }}>{ROLE_LABELS[user.role]}</T>
           </View>
           {user.specialty && <Badge label={user.specialty} color="primary" />}
           <Badge label="Verified ✓" color="success" />
         </View>
-        <Text style={[styles.facility, { color: C.textSec }]}>{user.facility}</Text>
+        <T style={[styles.facility, { color: C.textSec }]}>{user.facility}</T>
         <Btn
           label={editing ? 'Cancel' : 'Edit profile'}
           onPress={() => { setEditing(e => !e); setForm({ ...user }); }}
@@ -73,12 +74,12 @@ export function ProfileScreen({ user, onUpdateUser }) {
       {/* Info grid */}
       {!!error && (
         <Card style={styles.infoCard}>
-          <Text style={{ color: C.danger, fontSize: 12 }}>{error}</Text>
+          <T style={{ color: C.danger, fontSize: 12 }}>{error}</T>
         </Card>
       )}
       {!editing && (
         <Card style={styles.infoCard}>
-          <Text style={[styles.sectionTitle, { color: C.text }]}>Account details</Text>
+          <T style={[styles.sectionTitle, { color: C.text }]}>Account details</T>
           {[
             { icon: 'mail',      label: 'Email',     value: user.email },
             { icon: 'phone',     label: 'Phone',     value: user.phone || '—' },
@@ -88,8 +89,8 @@ export function ProfileScreen({ user, onUpdateUser }) {
           ].map(row => (
             <View key={row.label} style={[styles.infoRow, { borderBottomColor: C.divider }]}>
               <Icon name={row.icon} lib="feather" size={14} color={C.textMuted} style={{ marginRight: 10, marginTop: 1 }} />
-              <Text style={[styles.infoLabel, { color: C.textMuted }]}>{row.label}</Text>
-              <Text style={[styles.infoValue, { color: C.text }]} numberOfLines={1}>{row.value}</Text>
+              <T style={[styles.infoLabel, { color: C.textMuted }]}>{row.label}</T>
+              <T style={[styles.infoValue, { color: C.text }]} numberOfLines={1}>{row.value}</T>
             </View>
           ))}
         </Card>
@@ -98,12 +99,12 @@ export function ProfileScreen({ user, onUpdateUser }) {
       {/* Multi-hospital affiliations (doctors only) */}
       {!editing && user.affiliated_hospitals && user.affiliated_hospitals.length > 1 && (
         <Card style={styles.infoCard}>
-          <Text style={[styles.sectionTitle, { color: C.text }]}>Hospital affiliations</Text>
+          <T style={[styles.sectionTitle, { color: C.text }]}>Hospital affiliations</T>
           <View style={[styles.infoRow, { borderBottomColor: 'transparent' }]}>
             <Icon name="home" lib="feather" size={14} color={C.textMuted} style={{ marginRight: 10 }} />
-            <Text style={[styles.infoValue, { color: C.textSec }]}>
+            <T style={[styles.infoValue, { color: C.textSec }]}>
               Affiliated with {user.affiliated_hospitals.length} hospitals. Your data scope is limited to whichever hospital you're currently signed into.
-            </Text>
+            </T>
           </View>
         </Card>
       )}
@@ -111,7 +112,7 @@ export function ProfileScreen({ user, onUpdateUser }) {
       {/* Edit form */}
       {editing && (
         <Card style={styles.infoCard}>
-          <Text style={[styles.sectionTitle, { color: C.text }]}>Edit profile</Text>
+          <T style={[styles.sectionTitle, { color: C.text }]}>Edit profile</T>
           <Input label="First name"  value={form.first_name} onChangeText={v => set('first_name', v)} icon="user" />
           <Input label="Last name"   value={form.last_name}  onChangeText={v => set('last_name', v)} />
           <Input label="Phone"       value={form.phone || ''} onChangeText={v => set('phone', v)} icon="phone" keyboardType="phone-pad" />
@@ -128,11 +129,11 @@ export function ProfileScreen({ user, onUpdateUser }) {
       <Card style={styles.infoCard}>
         <View style={styles.permHeader}>
           <Icon name="shield" lib="feather" size={15} color={C.primary} style={{ marginRight: 8 }} />
-          <Text style={[styles.sectionTitle, { color: C.text, marginBottom: 0 }]}>Your access level</Text>
+          <T style={[styles.sectionTitle, { color: C.text, marginBottom: 0 }]}>Your access level</T>
         </View>
-        <Text style={[styles.permDesc, { color: C.textMuted }]}>
+        <T style={[styles.permDesc, { color: C.textMuted }]}>
           {ROLE_DESC[user.role] || 'Standard access'}
-        </Text>
+        </T>
       </Card>
     </ScreenContainer>
   );
@@ -148,17 +149,17 @@ const ROLE_DESC = {
 
 const styles = StyleSheet.create({
   heroCard:   { alignItems: 'center', padding: 24, marginBottom: 14 },
-  name:       { fontSize: 20, fontWeight: '800', marginTop: 12, marginBottom: 4 },
+  name:       { fontSize: 22, fontWeight: '800', marginTop: 12, marginBottom: 4 },
   email:      { fontSize: 13, marginBottom: 10 },
   badgeRow:   { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 6 },
   rolePill:   { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  facility:   { fontSize: 12 },
+  facility:   { fontSize: 13 },
   infoCard:   { padding: 16, marginBottom: 14 },
-  sectionTitle:{ fontSize: 14, fontWeight: '700', marginBottom: 14 },
+  sectionTitle:{ fontSize: 15, fontWeight: '700', marginBottom: 14 },
   infoRow:    { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1 },
-  infoLabel:  { fontSize: 12, width: 72, flexShrink: 0 },
-  infoValue:  { fontSize: 13, flex: 1, fontWeight: '500' },
+  infoLabel:  { fontSize: 13, width: 72, flexShrink: 0 },
+  infoValue:  { fontSize: 14, flex: 1, fontWeight: '500' },
   editActions:{ marginTop: 16 },
   permHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  permDesc:   { fontSize: 13, lineHeight: 19 },
+  permDesc:   { fontSize: 14, lineHeight: 20 },
 });

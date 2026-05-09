@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
+import { T } from '../../../atoms/T';
 import { Card } from '../../../atoms/Card';
 import { Icon } from '../../../atoms/Icon';
 import { Btn } from '../../../atoms/Btn';
@@ -14,7 +15,7 @@ export function NotificationsScreen({
   onMarkRead,
   onMarkAllRead,
 }) {
-  const { C } = useTheme();
+  const { C, typography } = useTheme();
   const [error, setError] = useState('');
   const [markingAll, setMarkingAll] = useState(false);
 
@@ -44,7 +45,7 @@ export function NotificationsScreen({
   return (
     <ScreenContainer scroll contentContainerStyle={{ paddingBottom: 24 }}>
       <View style={styles.headerRow}>
-        <Text style={{ color: C.textMuted, fontSize: 12 }}>{unreadCount} unread</Text>
+        <T style={{ color: C.textMuted, fontSize: typography.sm }}>{unreadCount} unread</T>
         <Btn
           label={markingAll ? 'Please wait...' : 'Mark all read'}
           size="sm"
@@ -56,13 +57,13 @@ export function NotificationsScreen({
       {loading ? <SectionLoader label="Loading notifications..." /> : null}
       {!loading && notifications.length === 0 ? (
         <Card style={styles.card}>
-          <Text style={{ color: C.text, fontWeight: '700', marginBottom: 4 }}>No notifications yet</Text>
-          <Text style={{ color: C.textMuted, fontSize: 12 }}>
+          <T style={{ color: C.text, fontWeight: '700', fontSize: typography.body, marginBottom: 4 }}>No notifications yet</T>
+          <T style={{ color: C.textMuted, fontSize: typography.sm }}>
             Alerts about appointments and orders will appear here.
-          </Text>
+          </T>
         </Card>
       ) : null}
-      {error ? <Text style={{ color: C.danger, fontSize: 12, marginBottom: 10 }}>{error}</Text> : null}
+      {error ? <T style={{ color: C.danger, fontSize: typography.sm, marginBottom: 10 }}>{error}</T> : null}
       {visibleNotifications.map((n) => (
         <TouchableOpacity key={n.id} activeOpacity={0.85} onPress={() => markRead(n)}>
           <Card
@@ -82,24 +83,16 @@ export function NotificationsScreen({
                 <Icon name={n.icon.name} lib={n.icon.lib} size={18} color={C.primary} />
               </View>
               <View style={{ flex: 1, marginHorizontal: 8 }}>
-                <Text style={[styles.title, { color: C.text }]}>{n.title}</Text>
-                <Text style={{ color: C.textMuted, fontSize: 12, marginTop: 2 }}>
+                <T style={[styles.title, { color: C.text }]}>{n.title}</T>
+                <T style={{ color: C.textMuted, fontSize: typography.sm, marginTop: 2, lineHeight: 18 }}>
                   {settings?.privacy_mode ? 'Content hidden in privacy mode.' : n.body}
-                </Text>
+                </T>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 {!n.read ? (
-                  <View
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 4,
-                      backgroundColor: C.primary,
-                      marginBottom: 4,
-                    }}
-                  />
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary, marginBottom: 4 }} />
                 ) : null}
-                <Text style={{ color: C.textMuted, fontSize: 11 }}>{n.time}</Text>
+                <T style={{ color: C.textMuted, fontSize: typography.xs }}>{n.time}</T>
               </View>
             </View>
           </Card>
@@ -131,7 +124,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
+    lineHeight: 19,
   },
 });

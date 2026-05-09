@@ -3,6 +3,8 @@ import { Platform, Text, TouchableOpacity, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../theme/ThemeContext';
 import { Icon } from '../atoms/Icon';
+import dayjs from 'dayjs';
+import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 
 function toPickerDate(timeValue) {
   const [h = '09', m = '00'] = String(timeValue || '09:00').split(':');
@@ -17,22 +19,36 @@ export function TimePickerField({ label, value, onChange }) {
   const [showPicker, setShowPicker] = useState(false);
 
   if (isWeb) {
+    const pickerValue = value
+      ? dayjs().hour(Number(value.split(':')[0] || 0)).minute(Number(value.split(':')[1] || 0)).second(0)
+      : null;
     return (
       <View style={{ marginBottom: 12 }}>
-        {label ? <Text style={{ color: C.textMuted, fontSize: 12, marginBottom: 6 }}>{label}</Text> : null}
-        {React.createElement('input', {
-          type: 'time',
-          value: value || '',
-          onChange: (event) => onChange?.(event?.target?.value || ''),
-          style: {
-            width: '100%',
-            border: `1px solid ${C.border}`,
-            borderRadius: '10px',
-            padding: '10px 12px',
-            backgroundColor: C.inputBg,
-            color: C.text,
-          },
-        })}
+        <TimePicker
+          label={label || 'Time'}
+          value={pickerValue}
+          onChange={(next) => {
+            if (!next || !next.isValid?.()) return onChange?.('');
+            onChange?.(next.format('HH:mm'));
+          }}
+          slotProps={{
+            textField: {
+              fullWidth: true,
+              size: 'small',
+              sx: {
+                '& .MuiInputBase-root': {
+                  backgroundColor: C.inputBg,
+                },
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: C.border },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: C.primaryMid },
+                '& .Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: C.primary,
+                  boxShadow: `0 0 0 3px ${C.shadowMd}`,
+                },
+              },
+            },
+          }}
+        />
       </View>
     );
   }

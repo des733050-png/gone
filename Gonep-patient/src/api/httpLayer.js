@@ -1,3 +1,7 @@
+// FILE: src/api/httpLayer.js
+// COMPLETE REPLACEMENT
+// Adds: getSpecialties, getDoctors, getDoctorSlots, createAppointment, getMeetingRoom
+
 import { API_CONFIG, ENDPOINTS } from '../config/env';
 import { createCsrfManager } from './transport/csrfManager';
 import { createRequestClient } from './transport/requestClient';
@@ -12,11 +16,13 @@ export function createHttpLayer({ requireHttps = false } = {}) {
   const { apiFetch } = createRequestClient(csrfManager);
 
   return {
+    // ── Auth ────────────────────────────────────────────────────────────────
     async loginPatient(payload) {
       if (isNative()) {
+        const body = JSON.stringify({ portal: 'patient', ...(payload || {}) });
         const res = await apiFetch(
           ENDPOINTS.authMobileToken,
-          { method: 'POST', body: JSON.stringify(payload || {}) },
+          { method: 'POST', body },
           { allowCsrfRetry: false }
         );
         if (!res?.authenticated || !res?.token) {
@@ -25,9 +31,10 @@ export function createHttpLayer({ requireHttps = false } = {}) {
         getStore().authToken = res.token;
         return res.user;
       }
+      const body = JSON.stringify({ portal: 'patient', ...(payload || {}) });
       const res = await apiFetch(
         ENDPOINTS.authLogin,
-        { method: 'POST', body: JSON.stringify(payload || {}) },
+        { method: 'POST', body },
         { allowCsrfRetry: true }
       );
       if (!res?.authenticated) throw new Error('Authentication failed. Check your email and password.');
@@ -49,10 +56,23 @@ export function createHttpLayer({ requireHttps = false } = {}) {
 
     async getCurrentUser() {
       try {
-        if (isNative() && getStore().authToken) return apiFetch(ENDPOINTS.currentUser);
+        if (isNative() && getStore().authToken) {
+          // Native: token-based — /me/ is the only source of truth
+          try { return await apiFetch(ENDPOINTS.currentUser); } catch { return null; }
+        }
+        // Web: session-cookie flow — check session first
         const session = await apiFetch(ENDPOINTS.authSession);
         if (!session?.authenticated) return null;
-        return apiFetch(ENDPOINTS.currentUser);
+        // Session is valid — try to enrich with full patient profile
+        try {
+          return await apiFetch(ENDPOINTS.currentUser);
+        } catch {
+          // /me/ returned 404 / 403 (patient profile not linked yet, or
+          // transient backend error). The session IS still valid, so return
+          // the minimal user from the session response so the app does NOT
+          // force-logout the user on every hot-reload.
+          return session.user || null;
+        }
       } catch {
         return null;
       }
@@ -82,13 +102,49 @@ export function createHttpLayer({ requireHttps = false } = {}) {
       }
     },
 
+    requestPasswordReset(payload = {}) {
+      return apiFetch(ENDPOINTS.authForgotPasswordRequest, {
+        method: 'POST',
+        body: JSON.stringify({ portal: 'patient', ...(payload || {}) }),
+      });
+    },
+
+    verifyPasswordReset(payload = {}) {
+      return apiFetch(ENDPOINTS.authForgotPasswordVerify, {
+        method: 'POST',
+        body: JSON.stringify({ portal: 'patient', ...(payload || {}) }),
+      });
+    },
+
+    // ── Booking discovery ───────────────────────────────────────────────────
+    async getSpecialties() {
+      return apiFetch(ENDPOINTS.patientSpecialties);
+    },
+
+    async getDoctors(specialty = '') {
+      const url = specialty
+        ? `${ENDPOINTS.patientDoctors}?specialty=${encodeURIComponent(specialty)}`
+        : ENDPOINTS.patientDoctors;
+      return apiFetch(url);
+    },
+
+    async getDoctorSlots(providerCode, appointmentType = '') {
+      const url = appointmentType
+        ? `${ENDPOINTS.patientDoctorSlots(providerCode)}?type=${encodeURIComponent(appointmentType)}`
+        : ENDPOINTS.patientDoctorSlots(providerCode);
+      return apiFetch(url);
+    },
+
+    // ── Appointments ────────────────────────────────────────────────────────
     async getAppointments(filters = {}) {
       const params = new URLSearchParams();
       Object.entries(filters || {}).forEach(([key, value]) => {
         if (value === null || value === undefined || value === '') return;
         params.append(key, value);
       });
-      const url = params.toString() ? `${ENDPOINTS.appointments}?${params.toString()}` : ENDPOINTS.appointments;
+      const url = params.toString()
+        ? `${ENDPOINTS.appointments}?${params.toString()}`
+        : ENDPOINTS.appointments;
       return apiFetch(url);
     },
 
@@ -103,6 +159,36 @@ export function createHttpLayer({ requireHttps = false } = {}) {
       });
     },
 
+    async createAppointment(payload) {
+      const p = payload || {};
+      const slotDatetime = p.slot_datetime || p.scheduled_for;
+      const body = {
+        provider_code: p.provider_code,
+        slot_datetime: slotDatetime,
+        service_type: p.service_type || 'Consultation',
+        service_type_detail: p.appointment_type || p.service_type_detail || 'In Facility',
+        notes: p.notes ?? p.reason ?? '',
+      };
+      return apiFetch(ENDPOINTS.appointmentCreate, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+
+    async getMeetingRoom(bookingRef) {
+      return apiFetch(ENDPOINTS.appointmentMeetingRoom(bookingRef));
+    },
+
+    async rescheduleAppointment(bookingRef, slotDatetime, appointmentType) {
+      const body = { slot_datetime: slotDatetime };
+      if (appointmentType) body.appointment_type = appointmentType;
+      return apiFetch(ENDPOINTS.appointmentReschedule(bookingRef), {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+    },
+
+    // ── Orders (code retained, UI disabled) ─────────────────────────────────
     async getOrders() {
       return apiFetch(ENDPOINTS.orders);
     },
@@ -115,6 +201,7 @@ export function createHttpLayer({ requireHttps = false } = {}) {
       return apiFetch(ENDPOINTS.orderReorder(id), { method: 'POST' });
     },
 
+    // ── Records ─────────────────────────────────────────────────────────────
     async getRecords() {
       return apiFetch(ENDPOINTS.records);
     },
@@ -123,14 +210,17 @@ export function createHttpLayer({ requireHttps = false } = {}) {
       return apiFetch(ENDPOINTS.recordDetail(id));
     },
 
+    // ── Vitals (NI — code retained) ─────────────────────────────────────────
     async getVitals() {
       return apiFetch(ENDPOINTS.vitals);
     },
 
+    // ── Chat (NI — code retained) ────────────────────────────────────────────
     async getChatThread() {
       return apiFetch(ENDPOINTS.chatThread);
     },
 
+    // ── Notifications ────────────────────────────────────────────────────────
     async getNotifications() {
       return apiFetch(ENDPOINTS.notifications);
     },
@@ -143,6 +233,7 @@ export function createHttpLayer({ requireHttps = false } = {}) {
       return apiFetch(ENDPOINTS.notificationsReadAll, { method: 'POST' });
     },
 
+    // ── Support ──────────────────────────────────────────────────────────────
     async getSupportTickets() {
       return apiFetch(ENDPOINTS.supportTickets);
     },
@@ -154,25 +245,33 @@ export function createHttpLayer({ requireHttps = false } = {}) {
       });
     },
 
-    subscribePatientEvents({ cursor, onEvent, onError } = {}) {
+    // ── SSE stream ───────────────────────────────────────────────────────────
+    subscribePatientEvents({ cursor, onEvent, onError, onOpen } = {}) {
       if (typeof EventSource === 'undefined') return () => {};
-      const streamUrl = new URL(ENDPOINTS.patientEventsStream);
-      if (cursor) streamUrl.searchParams.set('cursor', cursor);
-      const source = new EventSource(streamUrl.toString(), { withCredentials: true });
-      const handleMessage = (type) => (evt) => {
-        try {
-          onEvent?.({ type, payload: JSON.parse(evt.data || '{}') });
-        } catch (error) {
+      try {
+        const streamUrl = new URL(ENDPOINTS.patientEventsStream);
+        if (cursor) streamUrl.searchParams.set('cursor', cursor);
+        const source = new EventSource(streamUrl.toString(), { withCredentials: true });
+        const handleMessage = (type) => (evt) => {
+          try {
+            onEvent?.({ type, payload: JSON.parse(evt.data || '{}') });
+          } catch (error) {
+            onError?.(error);
+          }
+        };
+        source.onopen = () => {
+          onOpen?.();
+        };
+        source.addEventListener('notification', handleMessage('notification'));
+        source.addEventListener('appointment', handleMessage('appointment'));
+        source.onerror = (error) => {
           onError?.(error);
-        }
-      };
-      source.addEventListener('notification', handleMessage('notification'));
-      source.addEventListener('appointment', handleMessage('appointment'));
-      source.onerror = (error) => {
-        onError?.(error);
-        source.close();
-      };
-      return () => source.close();
+          source.close();
+        };
+        return () => source.close();
+      } catch {
+        return () => {};
+      }
     },
   };
 }

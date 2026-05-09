@@ -3,6 +3,7 @@ import { getAppointments } from '../api';
 
 export function useAppointments() {
   const [appointments, setAppointments] = useState([]);
+  const [recycleBinAppointments, setRecycleBinAppointments] = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
 
@@ -10,8 +11,12 @@ export function useAppointments() {
     try {
       setLoading(true);
       setError(null);
-      const data = await getAppointments();
-      setAppointments(data || []);
+      const [activeData, recycleData] = await Promise.all([
+        getAppointments({ bin: false }),
+        getAppointments({ bin: true }),
+      ]);
+      setAppointments(activeData || []);
+      setRecycleBinAppointments(recycleData || []);
     } catch (e) {
       setError(e?.message || 'Failed to load appointments');
     } finally {
@@ -21,5 +26,5 @@ export function useAppointments() {
 
   useEffect(() => { load(); }, [load]);
 
-  return { appointments, loading, error, reload: load };
+  return { appointments, recycleBinAppointments, loading, error, reload: load };
 }

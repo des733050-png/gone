@@ -13,6 +13,7 @@ import { Icon } from '../../../atoms/Icon';
 import { ScreenContainer } from '../../../organisms/ScreenContainer';
 import { isOwnDataOnly } from '../../../config/roles';
 import { getPatients } from '../../../api';
+import { PaginationControls } from '../../../molecules/PaginationControls';
 import { PatientDetailScreen } from './PatientDetailScreen';
 
 // Role descriptions shown on the EMR list
@@ -31,6 +32,8 @@ export function EMRScreen({ user }) {
   const [patientsData, setPatientsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const ownOnly  = isOwnDataOnly(user?.role);
   useEffect(() => {
@@ -59,6 +62,20 @@ export function EMRScreen({ user }) {
       (p.conditions || []).some(c => c.toLowerCase().includes(search.toLowerCase()));
     return matchRole && matchSearch;
   }), [patientsData, ownOnly, search, user?.id]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, ownOnly, pageSize]);
+
+  const paginatedPatients = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return patients.slice(start, start + pageSize);
+  }, [patients, currentPage, pageSize]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(patients.length / pageSize));
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [patients.length, pageSize, currentPage]);
 
   // ── Patient detail screen ─────────────────────────────────────────────────
   if (selectedPatient) {
@@ -113,7 +130,21 @@ export function EMRScreen({ user }) {
         </View>
       )}
 
-      {patients.map(p => (
+      {patients.length > 0 && (
+        <PaginationControls
+          totalItems={patients.length}
+          currentPage={currentPage}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
+          itemLabel="patients"
+        />
+      )}
+
+      {paginatedPatients.map(p => (
         <Card key={p.id} hover onPress={() => setSelectedPatient(p)} style={styles.card}>
           <View style={styles.row}>
             {/* Avatar initial */}
@@ -157,6 +188,20 @@ export function EMRScreen({ user }) {
           </View>
         </Card>
       ))}
+
+      {patients.length > 0 && (
+        <PaginationControls
+          totalItems={patients.length}
+          currentPage={currentPage}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
+          itemLabel="patients"
+        />
+      )}
     </ScreenContainer>
   );
 }

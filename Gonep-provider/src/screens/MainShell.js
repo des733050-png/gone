@@ -18,10 +18,13 @@ import { getNotifications } from '../api';
 import { DashboardScreen, AppointmentsScreen, AvailabilityScreen,
          EMRScreen, LabScreen, PharmacyScreen }     from './clinical';
 import { BillingScreen, InventoryScreen, StaffScreen,
-         LogsScreen, AnalyticsScreen, SupportTicketsScreen } from './operations';
+         LogsScreen, AnalyticsScreen, SupportTicketsScreen,
+         SpecializationsScreen } from './operations';
 import { NotificationsScreen, ProfileScreen,
          SettingsScreen }                           from './account';
 import { POSScreen }                                from './pos';
+// ── Onboarding overlay — shown once to facility_admin on first login only ──
+import { GettingStartedOverlay } from './Auth/Onboarding/GettingStartedOverlay';
 
 // ─── Nav tree definition ──────────────────────────────────────────────────────
 // Each entry is either a section or a nav item.
@@ -76,15 +79,16 @@ const ALL_NAV_TREE = [
           { id: 'avail-doctors', label: 'All doctors',     roles: ['hospital_admin','receptionist'] },
         ],
       },
-      {
-        id: 'pharmacy', label: 'Pharmacy & Rx',
-        icon: { lib: 'mc', name: 'pill' },
-        roles: ['hospital_admin','doctor','lab_manager'],
-        sub: [
-          { id: 'pharmacy-pending',    label: 'Pending dispatch' },
-          { id: 'pharmacy-dispatched', label: 'Dispatched'       },
-        ],
-      },
+      // Pharmacy & Rx is intentionally disabled — module not yet integrated.
+      // {
+      //   id: 'pharmacy', label: 'Pharmacy & Rx',
+      //   icon: { lib: 'mc', name: 'pill' },
+      //   roles: ['hospital_admin','doctor','lab_manager'],
+      //   sub: [
+      //     { id: 'pharmacy-pending',    label: 'Pending dispatch' },
+      //     { id: 'pharmacy-dispatched', label: 'Dispatched'       },
+      //   ],
+      // },
       {
         id: 'emr', label: 'EMR',
         icon: { lib: 'mc', name: 'file-document-outline' },
@@ -134,11 +138,12 @@ const ALL_NAV_TREE = [
         icon: { lib: 'feather', name: 'users' },
         roles: ['hospital_admin'],
         sub: [
-          { id: 'staff-all',         label: 'All members'     },
-          { id: 'staff-doctors',     label: 'Doctors'         },
-          { id: 'staff-billing',     label: 'Billing mgrs'   },
-          { id: 'staff-lab',         label: 'Lab / pharmacy' },
-          { id: 'staff-reception',   label: 'Receptionists'  },
+          { id: 'staff-all',             label: 'All members'    },
+          { id: 'staff-doctors',         label: 'Doctors'        },
+          { id: 'staff-billing',         label: 'Billing mgrs'  },
+          { id: 'staff-lab',             label: 'Lab / pharmacy' },
+          { id: 'staff-reception',       label: 'Receptionists' },
+          { id: 'staff-specializations', label: 'Specializations' },
         ],
       },
       {
@@ -146,11 +151,11 @@ const ALL_NAV_TREE = [
         icon: { lib: 'feather', name: 'activity' },
         roles: ['hospital_admin'],
       },
-      {
-        id: 'analytics', label: 'Analytics',
-        icon: { lib: 'feather', name: 'trending-up' },
-        roles: ['hospital_admin', 'billing_manager'],
-      },
+      //{
+       // id: 'analytics', label: 'Analytics',
+        //icon: { lib: 'feather', name: 'trending-up' },
+        //roles: ['hospital_admin', 'billing_manager'],
+      //},
       {
         id: 'support', label: 'Support Tickets',
         icon: { lib: 'feather', name: 'life-buoy' },
@@ -190,7 +195,6 @@ const ALL_NAV_TREE = [
 ];
 
 // ─── Sub-item → parent page mapping ──────────────────────────────────────────
-// When a sub-item is activated, which page gets rendered + which filter is passed
 const SUB_TO_PAGE = {
   'appts-all':        { page: 'appointments', filter: 'all'        },
   'appts-today':      { page: 'appointments', filter: 'today'      },
@@ -199,8 +203,6 @@ const SUB_TO_PAGE = {
   'appts-confirmed':  { page: 'appointments', filter: 'confirmed'  },
   'avail-my':         { page: 'availability', filter: 'my'         },
   'avail-doctors':    { page: 'availability', filter: 'doctors'    },
-  'pharmacy-pending':     { page: 'pharmacy', filter: 'pending_dispatch' },
-  'pharmacy-dispatched':  { page: 'pharmacy', filter: 'dispatched'       },
   'lab-all':          { page: 'lab',          filter: 'all'         },
   'lab-critical':     { page: 'lab',          filter: 'critical'    },
   'lab-normal':       { page: 'lab',          filter: 'normal'      },
@@ -211,23 +213,23 @@ const SUB_TO_PAGE = {
   'inv-all':          { page: 'inventory',    filter: 'all'         },
   'inv-low':          { page: 'inventory',    filter: 'low'         },
   'inv-out':          { page: 'inventory',    filter: 'out'         },
-  'staff-all':        { page: 'staff',        filter: 'all'         },
-  'staff-doctors':    { page: 'staff',        filter: 'doctor'      },
-  'staff-billing':    { page: 'staff',        filter: 'billing_manager' },
-  'staff-lab':        { page: 'staff',        filter: 'lab_manager'     },
-  'staff-reception':  { page: 'staff',        filter: 'receptionist'    },
+  'staff-all':             { page: 'staff',           filter: 'all'              },
+  'staff-doctors':         { page: 'staff',           filter: 'doctor'           },
+  'staff-billing':         { page: 'staff',           filter: 'billing_manager'  },
+  'staff-lab':             { page: 'staff',           filter: 'lab_manager'      },
+  'staff-reception':       { page: 'staff',           filter: 'receptionist'     },
+  'staff-specializations': { page: 'specializations', filter: null               },
   'support-all':      { page: 'support',      filter: 'all'             },
   'support-open':     { page: 'support',      filter: 'open'            },
   'support-mine':     { page: 'support',      filter: 'mine'            },
   'support-resolved': { page: 'support',      filter: 'resolved'        },
 };
 
-// ─── Build page meta from nav tree (avoids fragile index refs) ────────────────
+// ─── Page meta ────────────────────────────────────────────────────────────────
 const PAGE_META_BASE = {
   home:          { title: 'Dashboard',       sub: '' },
   appointments:  { title: 'Appointments',    sub: 'Patient scheduling'          },
   availability:  { title: 'Availability',    sub: 'Doctor schedules & slots'    },
-  pharmacy:      { title: 'Pharmacy & Rx',   sub: 'Prescription dispatch queue' },
   emr:           { title: 'EMR',             sub: 'Electronic medical records'  },
   lab:           { title: 'Lab Results',     sub: 'Results and critical flags'  },
   billing:       { title: 'Billing',         sub: 'Invoices and payments'       },
@@ -236,10 +238,10 @@ const PAGE_META_BASE = {
   logs:          { title: 'Activity Logs',   sub: 'Full audit trail'            },
   notifications: { title: 'Notifications',   sub: '' },
   profile:       { title: 'My Profile',      sub: 'Account & credentials'       },
-  settings:      { title: 'Settings',        sub: 'App preferences'             },
+  settings:        { title: 'Settings',         sub: 'App preferences'             },
+  specializations: { title: 'Specializations',  sub: 'Manage clinical specializations' },
 };
 
-// Find icon for a page from the tree
 function iconForPage(pageId) {
   for (const group of ALL_NAV_TREE) {
     for (const item of group.items) {
@@ -261,9 +263,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
   const navTree = useMemo(() => {
     const result = [];
     for (const group of ALL_NAV_TREE) {
-      // Skip entire section if role not in section roles
       if (group.roles && !group.roles.includes(userRole)) continue;
-
       const items = group.items
         .filter(item => !item.roles || item.roles.includes(userRole))
         .filter(item => allowedPages.includes(item.id))
@@ -273,18 +273,12 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
             ? item.sub.filter(s => !s.roles || s.roles.includes(userRole))
             : undefined,
         }));
-
-      if (items.length > 0) {
-        result.push({ section: group.section, items });
-      }
+      if (items.length > 0) result.push({ section: group.section, items });
     }
     return result;
   }, [userRole, allowedPages]);
 
-  // Flat list for TopBar and legacy props
-  const navItems = useMemo(() =>
-    navTree.flatMap(g => g.items),
-  [navTree]);
+  const navItems = useMemo(() => navTree.flatMap(g => g.items), [navTree]);
 
   const defaultPage = allowedPages[0] || 'home';
   const [page,         setPage]         = useState(defaultPage);
@@ -292,6 +286,27 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
   const [sidebarOpen,  setSidebarOpen]  = useState(sidebarDocked);
   const [notifUnread,  setNotifUnread]  = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  // ── Onboarding state ───────────────────────────────────────────────────────
+  // Seeded from the server value. Once true here it never goes back to false,
+  // so the overlay cannot reappear even before the next auth refresh.
+  // Only facility_admin users ever have onboarding_completed === false;
+  // all other roles have it true (or absent) and the overlay returns null.
+  const [onboardingCompleted, setOnboardingCompleted] = useState(
+    user?.onboarding_completed === true
+  );
+  // Merge the local flag into user so GettingStartedOverlay sees up-to-date state
+  const onboardingUser = useMemo(
+    () => ({ ...user, onboarding_completed: onboardingCompleted }),
+    [user, onboardingCompleted]
+  );
+
+  const handleOnboardingDismiss = useCallback(() => {
+    setOnboardingCompleted(true);
+    // Also push the update up to the auth context so it survives re-renders
+    if (onUpdateUser) onUpdateUser({ ...user, onboarding_completed: true });
+  }, [user, onUpdateUser]);
+  // ──────────────────────────────────────────────────────────────────────────
 
   useEffect(() => { setSidebarOpen(sidebarDocked); }, [sidebarDocked]);
 
@@ -305,9 +320,7 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
 
   useEffect(() => refreshUnread(), [refreshUnread]);
 
-  // goTo handles both direct page IDs and sub-item IDs
   const goTo = useCallback((id) => {
-    // Auto-close overlay sidebar on any navigation (mobile UX)
     if (!sidebarDocked) setSidebarOpen(false);
     if (SUB_TO_PAGE[id]) {
       const { page: p, filter: f } = SUB_TO_PAGE[id];
@@ -319,7 +332,6 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
     }
   }, [allowedPages, sidebarDocked]);
 
-  // Page meta (title, sub, icon)
   const meta = useMemo(() => {
     const base = PAGE_META_BASE[page] || PAGE_META_BASE.home;
     return {
@@ -333,7 +345,6 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
     };
   }, [page, user, notifUnread]);
 
-  // POS role renders a completely different fullscreen interface
   if (userRole === 'pos') {
     return (
       <View style={[styles.root, { backgroundColor: C.bg }]}>
@@ -347,18 +358,19 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
       case 'home':          return <DashboardScreen    user={user} goTo={goTo} />;
       case 'appointments':  return <AppointmentsScreen user={user} filter={pageFilter} />;
       case 'availability':  return <AvailabilityScreen user={user} filter={pageFilter} />;
-      case 'pharmacy':      return <PharmacyScreen     user={user} filter={pageFilter} />;
+      // case 'pharmacy':   return <PharmacyScreen     user={user} filter={pageFilter} />;
       case 'emr':           return <EMRScreen          user={user} />;
       case 'lab':           return <LabScreen          user={user} filter={pageFilter} />;
       case 'billing':       return <BillingScreen      filter={pageFilter} />;
       case 'inventory':     return <InventoryScreen    user={user} filter={pageFilter} />;
       case 'staff':         return <StaffScreen        user={user} filter={pageFilter} />;
       case 'logs':          return <LogsScreen           user={user} />;
-      case 'analytics':    return <AnalyticsScreen      user={user} />;
-      case 'support':      return <SupportTicketsScreen  user={user} filter={pageFilter} />;
+      case 'analytics':     return <AnalyticsScreen      user={user} />;
+      case 'support':       return <SupportTicketsScreen user={user} filter={pageFilter} />;
+      case 'specializations': return <SpecializationsScreen user={user} />;
       case 'notifications': return <NotificationsScreen onRead={refreshUnread} />;
       case 'profile':       return <ProfileScreen      user={user} onUpdateUser={onUpdateUser} />;
-      case 'settings':      return <SettingsScreen user={user} onLogout={onLogout} />;
+      case 'settings':      return <SettingsScreen     user={user} onLogout={onLogout} />;
       default:              return <DashboardScreen    user={user} goTo={goTo} />;
     }
   };
@@ -395,21 +407,31 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
           </TouchableWithoutFeedback>
         )}
         <View style={styles.topBarLayer}>
-        <TopBar
-          meta={meta}
-          user={user}
-          onToggleSidebar={() => setSidebarOpen(o => !o)}
-          onShowNotifications={() => { goTo('notifications'); setNotifUnread(0); }}
-          sidebarOpen={sidebarOpen}
-          sidebarDocked={sidebarDocked}
-          notificationsUnread={notifUnread}
-          onUserMenuSelect={handleUserMenuSelect}
-          userMenuOpen={userMenuOpen}
-          setUserMenuOpen={setUserMenuOpen}
-        />
+          <TopBar
+            meta={meta}
+            user={user}
+            onToggleSidebar={() => setSidebarOpen(o => !o)}
+            onShowNotifications={() => { goTo('notifications'); setNotifUnread(0); }}
+            sidebarOpen={sidebarOpen}
+            sidebarDocked={sidebarDocked}
+            notificationsUnread={notifUnread}
+            onUserMenuSelect={handleUserMenuSelect}
+            userMenuOpen={userMenuOpen}
+            setUserMenuOpen={setUserMenuOpen}
+          />
         </View>
         <View style={styles.page}>{renderPage()}</View>
       </View>
+
+      {/* ── First-login onboarding overlay ────────────────────────────────────
+           GettingStartedOverlay renders null for every role except
+           facility_admin with onboarding_completed === false.
+           Sits outside the main/sidebar split so it truly overlays everything. */}
+      <GettingStartedOverlay
+        user={onboardingUser}
+        onDone={handleOnboardingDismiss}
+        onSkip={handleOnboardingDismiss}
+      />
     </View>
   );
 }

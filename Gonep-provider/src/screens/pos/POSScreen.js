@@ -17,6 +17,7 @@ import { useTheme } from '../../theme/ThemeContext';
 import { Icon } from '../../atoms/Icon';
 import { Btn } from '../../atoms/Btn';
 import { Badge } from '../../atoms/Badge';
+import { SectionLoader } from '../../atoms/SectionLoader';
 import { usePOSTerminal } from '../../hooks/usePOSTerminal';
 import { PAYMENT_METHODS, fmt, safeNum } from '../../constants/pos';
 import { BarcodeInputHandler } from './molecules/BarcodeInputHandler';
@@ -104,10 +105,18 @@ export function POSScreen({ user, onLogout }) {
               )}
             </View>
 
+            {pos.loadingInv ? <SectionLoader label="Loading inventory…" /> : null}
             <FlatList
               data={pos.filtered}
               keyExtractor={i => i.id}
               showsVerticalScrollIndicator={false}
+              ListEmptyComponent={!pos.loadingInv ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ color: C.textMuted, fontSize: 13, textAlign: 'center' }}>
+                    {pos.search ? `No items matching "${pos.search}"` : 'No items in inventory yet. Add stock from the Inventory module.'}
+                  </Text>
+                </View>
+              ) : null}
               renderItem={({ item: p }) => {
                 const inCart      = pos.cart.find(c => c.id === p.id);
                 const hasSavedDisc = p.saved_discount && safeNum(p.saved_discount.value) > 0;

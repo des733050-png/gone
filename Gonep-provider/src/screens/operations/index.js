@@ -4,4 +4,5 @@ export { InventoryScreen }      from './Inventory';
 export { StaffScreen }          from './Staff';
 export { LogsScreen }           from './Logs';
 export { AnalyticsScreen }      from './Analytics';
-export { SupportTicketsScreen } from './SupportTickets';
+export { SupportTicketsScreen }   from './SupportTickets';
+export { SpecializationsScreen }  from './Specializations';

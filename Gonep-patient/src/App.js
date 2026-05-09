@@ -38,6 +38,15 @@ function RootNavigator() {
     };
   }, []);
 
+  // Force-logout when the API layer reports the session/cookie is no longer
+  // valid (401/403). The local store is wiped inside the request client.
+  useEffect(() => {
+    if (typeof globalThis === 'undefined' || !globalThis.addEventListener) return;
+    const handler = () => setUser(null);
+    globalThis.addEventListener('gonep:session-invalid', handler);
+    return () => globalThis.removeEventListener('gonep:session-invalid', handler);
+  }, []);
+
   const navTheme = useMemo(
     () => ({
       ...(isDark ? DarkTheme : DefaultTheme),
@@ -52,7 +61,7 @@ function RootNavigator() {
     <NavigationContainer theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
-          <Stack.Screen name="Auth">
+          <Stack.Screen name="Gonep Healthcare">
             {(props) => (
               <AuthScreen
                 {...props}

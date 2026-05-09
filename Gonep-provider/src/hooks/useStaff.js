@@ -1,6 +1,6 @@
 // ─── hooks/useStaff.js ───────────────────────────────────────────────────────
 import { useState, useEffect, useCallback } from 'react';
-import { suspendStaff, reactivateStaff, appendLog, getStaff } from '../api';
+import { suspendStaff, reactivateStaff, resetStaffPassword, appendLog, getStaff } from '../api';
 import { ROLE_FILTER_OPTIONS } from '../constants/staff';
 
 export function useStaff(propFilter, user) {
@@ -11,6 +11,9 @@ export function useStaff(propFilter, user) {
   const [editModal, setEditModal] = useState({ visible: false, member: null });
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState('');
+  // Holds the result of a Reset-password call so the screen can display
+  // the new one-time password to the admin.
+  const [passwordReset, setPasswordReset] = useState(null);
 
   useEffect(() => { if (propFilter) setFilter(propFilter); }, [propFilter]);
   const loadStaff = useCallback(async () => {
@@ -64,6 +67,31 @@ export function useStaff(propFilter, user) {
     setStaffList(prev => prev.map(x => x.id === id ? { ...x, suspended: false } : x));
   }, [staffList, user]);
 
+  const handleResetPassword = useCallback(async (id) => {
+    const member = staffList.find(x => x.id === id);
+    if (!member) return;
+    try {
+      const res = await resetStaffPassword(id);
+      appendLog({
+        staff: user ? `${user.first_name} ${user.last_name}` : 'Admin',
+        staff_id: user?.id, role: user?.role || 'hospital_admin',
+        module: 'Staff', action: 'Password reset',
+        detail: `${member.first_name} ${member.last_name}`, type: 'staff',
+      });
+      setPasswordReset({
+        memberId: id,
+        memberName: `${member.first_name} ${member.last_name}`,
+        email: member.email,
+        password: res?.temporary_password || '',
+        note: res?.password_note || '',
+      });
+    } catch (e) {
+      setError(e?.message || 'Failed to reset password.');
+    }
+  }, [staffList, user]);
+
+  const dismissPasswordReset = useCallback(() => setPasswordReset(null), []);
+
   const addMember = useCallback((m) => {
     const { invitation: _inv, ...safe } = m || {};
     setStaffList((prev) => [{ ...safe }, ...prev]);
@@ -79,7 +107,8 @@ export function useStaff(propFilter, user) {
     editModal, setEditModal,
     loading, error,
     filtered, counts,
-    handleSuspend, handleReactivate,
+    handleSuspend, handleReactivate, handleResetPassword,
+    passwordReset, dismissPasswordReset,
     addMember, editMember,
   };
 }

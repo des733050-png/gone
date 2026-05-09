@@ -63,6 +63,16 @@ export const submitFacilityApplication = async (payload = {}) => {
   };
 };
 
+export const requestPasswordReset = async () => {
+  await delay(300);
+  return { detail: 'If that email is registered, an OTP has been sent.' };
+};
+
+export const verifyPasswordReset = async () => {
+  await delay(300);
+  return { temp_password: 'TempMockPass1' };
+};
+
 // ─── Fetch functions ──────────────────────────────────────────────────────────
 function withScheduledFor(row) {
   if (row.scheduled_for) return { ...row };
@@ -259,6 +269,26 @@ function getStaff() {
   return _staff;
 }
 
+export const fetchFacilitySpecialties = async () => {
+  await delay();
+  return [
+    { id: 'spec-mock-gp', name: 'General Practice' },
+    { id: 'spec-mock-im', name: 'Internal Medicine' },
+    { id: 'spec-mock-ped', name: 'Pediatrics' },
+  ];
+};
+
+export const createFacilitySpecialty = async (payload) => {
+  await delay(200);
+  const name = String(payload?.name || 'New Specialty').trim();
+  return { id: `spec-mock-${Date.now()}`, name };
+};
+
+export const deleteFacilitySpecialty = async () => {
+  await delay(200);
+  return null;
+};
+
 export const fetchStaff = async () => {
   await delay();
   return getStaff().map(s => ({ ...s }));
@@ -445,8 +475,7 @@ let _posTransactions = null;
 
 function getPosAccounts() {
   if (!_posAccounts) {
-    const { MOCK_POS_ACCOUNTS } = require('./data');
-    _posAccounts = MOCK_POS_ACCOUNTS.map(a => ({ ...a }));
+    _posAccounts = []; // facilities start with no POS terminals; staff create them
   }
   return _posAccounts;
 }

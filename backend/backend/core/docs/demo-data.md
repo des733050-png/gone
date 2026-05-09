@@ -19,12 +19,13 @@ python manage.py seed_demo_data --password "YourStrongDemoPassword123!"
 
 ## What Gets Created
 - Role groups via `bootstrap_control_groups`.
-- Demo users:
-  - `demo_superadmin`
-  - `demo_admin_user`
-  - `demo_patient_user`
-  - `demo_provider_user`
-  - `demo_rider_user`
+- Facilities **Nairobi General** and **Westlands Medical Centre**, each with a **VERIFIED** `ProviderVerificationSubmission` so provider APIs that enforce verification work in demo.
+- Demo users (emails are the login identifiers in the portals):
+  - `demo.superadmin@gonep.local` — Django superuser; **do not use** for the Provider mobile/web app (`/api/v1/provider/*` expects a staff membership).
+  - `admin@nairobi-general.co.ke`, `doctor@nairobi-general.co.ke`, `billing@…`, `lab@…`, `reception@…`, `pos1@…` — Nairobi staff (use these for **Provider portal**).
+  - `doctor@westlands-medical.co.ke` — doctor at Westlands (patient can book after switching facility).
+  - `demo.patient@gonep.local` — **Patient portal**.
+  - `demo.rider@gonep.local` — **Rider portal**.
 - Cross-cutting records:
   - `Tag`, `AuditEvent`, `TimelineEvent`, `Attachment`, `Note`, `ActionQueueItem`
 - Control Admin records:
@@ -35,16 +36,19 @@ python manage.py seed_demo_data --password "YourStrongDemoPassword123!"
 - Patient records:
   - `PatientProfile`, `PatientBooking`, `PatientConsultation`, `PatientPrescription`, `PatientDiagnosticOrder`, `PatientRecordEvent`, `PatientSupportTicket`
 - Provider records:
-  - `ProviderProfile`, `ProviderAppointment`, `ProviderConsultation`, `ProviderPrescriptionTask`, `ProviderEarningsSnapshot`, `ProviderProtocol`
+  - `ProviderProfile`, `ProviderMembership`, `ProviderAvailability` (multi-day slots: In Facility, Virtual, Home Visit), `ProviderVerificationSubmission` (VERIFIED), `ProviderAppointment`, `ProviderConsultation`, `ProviderPrescriptionTask`, `ProviderEarningsSnapshot`, `ProviderProtocol`
 - Rider records:
   - `RiderProfile`, `RiderJob`, `RiderHistoryEntry`, `RiderEarningsSnapshot`
 
 ## Default Credentials
-- Username: `demo_superadmin`
-- Password: `Demo@12345`
+- Default password for most seeded users: **`Demo@12345`** (override with `--password`).
+- Superuser password defaults to **`password@123`** (`--superadmin-password`).
 
 Use `--password` to change this during seed execution.
-For full seeded user list, see `core/docs/demo-user-passwords.md`.
+For a concise credential list, see `core/docs/demo-user-passwords.md`.
+
+## Provider vs superuser
+Sign in to the **Gonep Provider** app with a **staff** email (e.g. `doctor@nairobi-general.co.ke`), not the superuser. The superuser has no `ProviderMembership`, so `/api/v1/provider/me/` returns 404.
 
 ## Notes
 - The command updates existing demo records to expected defaults when re-run.

@@ -10,7 +10,7 @@ import { useTheme } from '../../../../theme/ThemeContext';
 import { ROLE_LABELS, ROLE_COLORS } from '../../../../config/roles';
 import { PERMS } from '../../../../constants/staff';
 
-export function StaffCard({ member, onEdit, onSuspend, onReactivate }) {
+export function StaffCard({ member, onEdit, onSuspend, onReactivate, onResetPassword }) {
   const { C } = useTheme();
 
   const roleColorMap = {
@@ -78,6 +78,15 @@ export function StaffCard({ member, onEdit, onSuspend, onReactivate }) {
               style={{ marginLeft: 8 }}
             />
           )}
+          {/* Reset password — generates a fresh one-time password */}
+          {!member.suspended && onResetPassword ? (
+            <Btn
+              label="Reset password" size="sm" variant="ghost"
+              icon={<Icon name="key" lib="feather" size={12} color={C.textSec} />}
+              onPress={onResetPassword}
+              style={{ marginLeft: 8 }}
+            />
+          ) : null}
         </View>
       )}
     </Card>

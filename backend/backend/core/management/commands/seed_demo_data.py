@@ -41,6 +41,8 @@ class Command(BaseCommand):
         facilities = self._seed_facilities()
         users = self._seed_users(user_model, password, superadmin_password)
         memberships = self._seed_staff(users, facilities)
+        self._seed_provider_verifications(facilities, users, now)
+        self._seed_westlands_staff(users, facilities)
         patient_link = self._seed_patient(users, facilities, now)
         rider_link = self._seed_rider(users, facilities, now)
 
@@ -199,14 +201,38 @@ class Command(BaseCommand):
                 first_name="Kevin",
                 last_name="Mwangi",
             ),
+            "doctor_westlands": self._upsert_user(
+                user_model,
+                username="doctor_westlands",
+                email="doctor@westlands-medical.co.ke",
+                password=password,
+                is_staff=True,
+                is_superuser=False,
+                first_name="James",
+                last_name="Kiprop",
+            ),
         }
 
-    def _provider_profile(self, facility, user, *, specialty="", license_number="", phone=""):
+    def _provider_profile(
+        self,
+        facility,
+        user,
+        *,
+        specialty="",
+        facility_specialty=None,
+        license_number="",
+        phone="",
+    ):
+        fs = facility_specialty
+        if fs is None and specialty:
+            fs = models.FacilitySpecialty.resolve_for_facility(facility, specialty)
+        spec_display = fs.name if fs else specialty
         return models.ProviderProfile.objects.create(
             provider_code=self._next_code(models.ProviderProfile, "provider_code", "PRV-", 4),
             facility=facility,
             full_name=user.get_full_name().strip() or user.email,
-            specialty=specialty,
+            facility_specialty=fs,
+            specialty=spec_display,
             status=models.WorkflowStatus.CONFIRMED,
             phone=phone,
             email=user.email,
@@ -223,12 +249,21 @@ class Command(BaseCommand):
             "doctor": self._provider_profile(
                 facility,
                 users["doctor"],
-                specialty="General Practice",
+                facility_specialty=models.FacilitySpecialty.resolve_for_facility(
+                    facility, "General Practice"
+                ),
                 license_number="KMPDC-1001",
                 phone="+254722222222",
             ),
             "billing": self._provider_profile(facility, users["billing"], phone="+254733333333"),
-            "lab": self._provider_profile(facility, users["lab"], specialty="Laboratory", phone="+254744444444"),
+            "lab": self._provider_profile(
+                facility,
+                users["lab"],
+                facility_specialty=models.FacilitySpecialty.resolve_for_facility(
+                    facility, "Laboratory"
+                ),
+                phone="+254744444444",
+            ),
             "reception": self._provider_profile(facility, users["reception"], phone="+254755555555"),
         }
 
@@ -250,6 +285,52 @@ class Command(BaseCommand):
                 is_active=True,
             )
         return membership_map
+
+    def _seed_provider_verifications(self, facilities, users, now):
+        """VERIFIED submissions so provider APIs with enforce_verification=True work in demo."""
+        reviewer = users["superadmin"]
+        submitter = users["facility_admin"]
+        for fac in facilities.values():
+            models.ProviderVerificationSubmission.objects.create(
+                facility=fac,
+                submitted_by=submitter,
+                status=models.ProviderVerificationStatus.VERIFIED,
+                reviewed_by=reviewer,
+                reviewed_at=now,
+                rejection_reason="",
+            )
+
+    def _seed_westlands_staff(self, users, facilities):
+        """Second facility doctor + slots so patient facility switch can book at Westlands."""
+        facility = facilities["westlands"]
+        profile = self._provider_profile(
+            facility,
+            users["doctor_westlands"],
+            facility_specialty=models.FacilitySpecialty.resolve_for_facility(
+                facility, "Internal Medicine"
+            ),
+            license_number="KMPDC-2002",
+            phone="+254788888888",
+        )
+        models.ProviderMembership.objects.create(
+            user=users["doctor_westlands"],
+            provider=profile,
+            facility=facility,
+            role=models.ProviderSubRole.DOCTOR,
+            is_active=True,
+        )
+        models.ProviderAvailability.objects.create(
+            provider=profile,
+            facility=facility,
+            slots=[
+                {"id": "ws-m", "day": "Monday", "start": "11:00", "end": "16:00", "type": "In Facility"},
+                {"id": "ws-tu", "day": "Tuesday", "start": "09:00", "end": "13:00", "type": "In Facility"},
+                {"id": "ws-we", "day": "Wednesday", "start": "09:00", "end": "12:00", "type": "Virtual"},
+                {"id": "ws-th", "day": "Thursday", "start": "10:00", "end": "14:00", "type": "Home Visit"},
+                {"id": "ws-fr", "day": "Friday", "start": "10:00", "end": "15:00", "type": "In Facility"},
+            ],
+            blocked_days=[],
+        )
 
     def _seed_patient(self, users, facilities, now):
         patient = models.PatientProfile.objects.create(
@@ -290,10 +371,6 @@ class Command(BaseCommand):
                 facility=facility,
                 appointment_reminders=True,
                 order_updates=True,
-                lab_results_alerts=True,
-                medication_refill_reminders=True,
-                marketing_updates=False,
-                privacy_mode=False,
             )
         return link
 
@@ -344,91 +421,31 @@ class Command(BaseCommand):
         patient = patient_link.patient
         facility = facilities["nairobi"]
         doctor = memberships["doctor"].provider
-        # Appointments: upcoming, pending confirmation, in progress, past, cancelled
-        appointments = [
-            {
-                "ref": "PBK-0001",
-                "status": models.WorkflowStatus.CONFIRMED,
-                "scheduled_for": now + timedelta(days=2),
-                "notes": "Upcoming review in 2 days.",
-            },
-            {
-                "ref": "PBK-0002",
-                "status": models.WorkflowStatus.CONFIRMED,
-                "scheduled_for": now + timedelta(days=5),
-                "notes": "Upcoming monthly blood pressure check.",
-            },
-            {
-                "ref": "PBK-0003",
-                "status": models.WorkflowStatus.DRAFT,
-                "scheduled_for": now + timedelta(days=3),
-                "notes": "Pending confirmation appointment.",
-            },
-            {
-                "ref": "PBK-0004",
-                "status": models.WorkflowStatus.CONFIRMED,
-                "scheduled_for": now - timedelta(minutes=10),
-                "notes": "Current appointment that should read as in progress.",
-            },
-            {
-                "ref": "PBK-0005",
-                "status": models.WorkflowStatus.COMPLETED,
-                "scheduled_for": now - timedelta(days=3),
-                "notes": "Completed follow-up visit.",
-            },
-            {
-                "ref": "PBK-0006",
-                "status": models.WorkflowStatus.CANCELLED,
-                "scheduled_for": now + timedelta(days=4),
-                "notes": "CANCEL_META|by=Faith Njoroge|reason=Travel conflict",
-            },
-            {
-                "ref": "PBK-0007",
-                "status": models.WorkflowStatus.COMPLETED,
-                "scheduled_for": now - timedelta(days=8),
-                "notes": "Past appointment #2.",
-            },
-        ]
-        booking_rows = []
-        for item in appointments:
-            booking_rows.append(
-                models.PatientBooking.objects.create(
-                    booking_ref=item["ref"],
-                    patient=patient,
-                    facility=facility,
-                    status=item["status"],
-                    service_type="Consultation",
-                    channel="web",
-                    provider_name=doctor.full_name,
-                    provider_specialty=doctor.specialty,
-                    location_details="Outpatient Wing",
-                    fee_amount=Decimal("2500.00"),
-                    scheduled_for=item["scheduled_for"],
-                    notes=item["notes"],
-                )
-            )
 
+        booking = models.PatientBooking.objects.create(
+            booking_ref="PBK-0001",
+            patient=patient,
+            facility=facility,
+            status=models.WorkflowStatus.CONFIRMED,
+            service_type="Consultation",
+            channel="web",
+            provider_name=doctor.full_name,
+            provider_specialty=doctor.specialty,
+            location_details="Outpatient Wing",
+            fee_amount=Decimal("2500.00"),
+            scheduled_for=now + timedelta(hours=2),
+            notes="Follow-up review.",
+        )
         consultation = models.PatientConsultation.objects.create(
             consultation_ref="CON-0001",
             patient=patient,
             facility=facility,
-            booking=booking_rows[4],
+            booking=booking,
             status=models.WorkflowStatus.IN_PROGRESS,
             provider_name=doctor.full_name,
             assessment="Stable blood pressure.",
-            plan="Continue monitoring and reduce sodium intake.",
+            plan="Continue monitoring.",
             consulted_at=now - timedelta(days=1),
-        )
-        consultation_two = models.PatientConsultation.objects.create(
-            consultation_ref="CON-0002",
-            patient=patient,
-            facility=facility,
-            booking=booking_rows[6],
-            status=models.WorkflowStatus.COMPLETED,
-            provider_name=doctor.full_name,
-            assessment="Improving medication adherence.",
-            plan="Continue same medication for 30 days.",
-            consulted_at=now - timedelta(days=7),
         )
         prescription = models.PatientPrescription.objects.create(
             rx_number="RX-0001",
@@ -441,17 +458,6 @@ class Command(BaseCommand):
             instructions="Take after breakfast.",
             issued_at=now - timedelta(days=1),
         )
-        prescription_two = models.PatientPrescription.objects.create(
-            rx_number="RX-0002",
-            patient=patient,
-            facility=facility,
-            consultation=consultation_two,
-            status=models.WorkflowStatus.CONFIRMED,
-            medication_name="Losartan 50mg",
-            dosage="Once daily",
-            instructions="Take in the evening.",
-            issued_at=now - timedelta(days=6),
-        )
         diagnostic = models.PatientDiagnosticOrder.objects.create(
             order_number="LAB-0001",
             patient=patient,
@@ -462,114 +468,78 @@ class Command(BaseCommand):
             result_summary="6.8%",
             result_at=now - timedelta(hours=12),
         )
-        diagnostic_two = models.PatientDiagnosticOrder.objects.create(
-            order_number="LAB-0002",
+        models.PatientRecordEvent.objects.create(
             patient=patient,
             facility=facility,
-            consultation=consultation_two,
+            event_type="consultation",
             status=models.WorkflowStatus.CONFIRMED,
-            test_type="Lipid Profile",
-            result_summary="LDL moderately elevated.",
-            result_at=now - timedelta(days=5),
+            title="Consultation review",
+            source_model="PatientConsultation",
+            source_identifier=consultation.consultation_ref,
+            details="Reviewed ongoing treatment plan.",
+            occurred_at=consultation.consulted_at,
         )
-
-        record_events = [
-            ("consultation", "Consultation review", "PatientConsultation", consultation.consultation_ref, consultation.consulted_at, "Reviewed ongoing treatment plan."),
-            ("prescription", "Medication prescribed", "PatientPrescription", prescription.rx_number, prescription.issued_at, "Amlodipine 5mg prescribed once daily."),
-            ("diagnostic", "Diagnostic result available", "PatientDiagnosticOrder", diagnostic.order_number, diagnostic.result_at or now - timedelta(hours=12), "HbA1c result uploaded."),
-            ("consultation", "Follow-up consultation", "PatientConsultation", consultation_two.consultation_ref, consultation_two.consulted_at, "Follow-up consultation completed."),
-            ("prescription", "Medication refill issued", "PatientPrescription", prescription_two.rx_number, prescription_two.issued_at, "Losartan refill issued."),
-            ("diagnostic", "Lipid profile posted", "PatientDiagnosticOrder", diagnostic_two.order_number, diagnostic_two.result_at, "Lipid panel added to your timeline."),
-        ]
-        for event_type, title, source_model, source_identifier, occurred_at, details in record_events:
-            models.PatientRecordEvent.objects.create(
-                patient=patient,
-                facility=facility,
-                event_type=event_type,
-                status=models.WorkflowStatus.CONFIRMED,
-                title=title,
-                source_model=source_model,
-                source_identifier=source_identifier,
-                details=details,
-                occurred_at=occurred_at,
-            )
-
-        # Orders and fulfillment states
-        order_specs = [
-            ("ORD-0001", models.PatientPortalOrderStatus.PENDING, "~20 mins", None, now - timedelta(minutes=20), None, 0),
-            ("ORD-0002", models.PatientPortalOrderStatus.IN_TRANSIT, "~10 mins", rider_link.rider, now - timedelta(hours=1), now - timedelta(minutes=30), 2),
-            ("ORD-0003", models.PatientPortalOrderStatus.DELIVERED, "Delivered", rider_link.rider, now - timedelta(days=1), now - timedelta(days=1, minutes=40), 3),
-            ("ORD-0004", models.PatientPortalOrderStatus.CANCELLED, "Cancelled", None, now - timedelta(days=2), None, 0),
-        ]
-        created_orders = []
-        for order_number, status, eta_label, rider, placed_at, started_at, progress_step in order_specs:
-            order_row = models.PatientMedicationOrder.objects.create(
-                order_number=order_number,
-                patient=patient,
-                facility=facility,
-                prescription=prescription if order_number in {"ORD-0001", "ORD-0002"} else prescription_two,
-                rider=rider,
-                status=status,
-                placed_at=placed_at,
-                eta_label=eta_label,
-                delivery_address=patient.address,
-                pickup_address="Nairobi General Hospital Pharmacy",
-                patient_phone=patient.phone,
-                rider_payout_amount=Decimal("450.00"),
-                distance_km=Decimal("7.4"),
-                estimated_minutes=25,
-                started_at=started_at,
-                delivered_at=placed_at + timedelta(hours=2) if status == models.PatientPortalOrderStatus.DELIVERED else None,
-                progress_step=progress_step,
-                notes=f"Seeded {status} order example.",
-            )
-            models.PatientMedicationOrderItem.objects.create(
-                order=order_row,
-                medication_name="Amlodipine 5mg" if order_number in {"ORD-0001", "ORD-0002"} else "Losartan 50mg",
-                quantity=30,
-            )
-            created_orders.append(order_row)
-
-        # Notifications: mixed read/unread and event ids
-        notification_rows = [
-            ("PN-0001", "appointment_created", "Appointment confirmed", "Your appointment PBK-0001 is confirmed.", "calendar", False, "patient-booking:PBK-0001:appointment_created"),
-            ("PN-0002", "appointment_in_progress", "Appointment in progress", "PBK-0004 is now in progress.", "clock", False, "patient-booking:PBK-0004:appointment_in_progress"),
-            ("PN-0003", "appointment_cancelled", "Appointment cancelled", "PBK-0006 was cancelled.", "x", True, "patient-booking:PBK-0006:appointment_cancelled"),
-            ("PN-0004", "order", "Order in transit", "ORD-0002 is on the way.", "truck", False, "patient-order:ORD-0002:in_transit"),
-            ("PN-0005", "order", "Order delivered", "ORD-0003 was delivered.", "check-circle", True, "patient-order:ORD-0003:delivered"),
-            ("PN-0006", "lab_result", "Lab result posted", "New lipid profile result is available.", "flask-outline", False, "patient-lab:LAB-0002:result"),
-        ]
-        for code, kind, title, body, icon_name, read, event_id in notification_rows:
-            models.PatientPortalNotification.objects.create(
-                notification_code=code,
-                patient=patient,
-                facility=facility,
-                event_id=event_id,
-                kind=kind,
-                title=title,
-                body=body,
-                icon_lib="feather",
-                icon_name=icon_name,
-                read=read,
-            )
-
-        # Support: multiple severities and statuses
-        support_rows = [
-            ("PT-0001", "Delivery update", "Need an ETA for ORD-0002.", models.WorkflowStatus.IN_PROGRESS, models.SeverityLevel.MEDIUM),
-            ("PT-0002", "Prescription clarification", "Please confirm evening dosage.", models.WorkflowStatus.COMPLETED, models.SeverityLevel.LOW),
-            ("PT-0003", "Payment issue", "I was charged twice for an order.", models.WorkflowStatus.CANCELLED, models.SeverityLevel.HIGH),
-        ]
-        for ticket_number, subject, message, status, severity in support_rows:
-            models.PatientSupportTicket.objects.create(
-                ticket_number=ticket_number,
-                patient=patient,
-                facility=facility,
-                subject=subject,
-                message=message,
-                status=status,
-                severity=severity,
-                channel="portal",
-            )
+        pending_order = models.PatientMedicationOrder.objects.create(
+            order_number="ORD-0001",
+            patient=patient,
+            facility=facility,
+            prescription=prescription,
+            status=models.PatientPortalOrderStatus.PENDING,
+            placed_at=now - timedelta(minutes=20),
+            eta_label="~20 mins",
+            delivery_address=patient.address,
+            pickup_address="Nairobi General Hospital Pharmacy",
+            patient_phone=patient.phone,
+            rider_payout_amount=Decimal("450.00"),
+            distance_km=Decimal("7.4"),
+            estimated_minutes=25,
+        )
+        models.PatientMedicationOrderItem.objects.create(
+            order=pending_order,
+            medication_name="Amlodipine 5mg",
+            quantity=30,
+        )
+        in_transit_order = models.PatientMedicationOrder.objects.create(
+            order_number="ORD-0002",
+            patient=patient,
+            facility=facility,
+            prescription=prescription,
+            rider=rider_link.rider,
+            status=models.PatientPortalOrderStatus.IN_TRANSIT,
+            placed_at=now - timedelta(hours=1),
+            eta_label="~10 mins",
+            delivery_address=patient.address,
+            pickup_address="Nairobi General Hospital Pharmacy",
+            patient_phone=patient.phone,
+            rider_payout_amount=Decimal("500.00"),
+            distance_km=Decimal("5.2"),
+            estimated_minutes=18,
+            started_at=now - timedelta(minutes=30),
+            progress_step=2,
+        )
+        models.PatientMedicationOrderItem.objects.create(
+            order=in_transit_order,
+            medication_name="Amlodipine 5mg",
+            quantity=30,
+        )
+        models.PatientPortalNotification.objects.create(
+            notification_code="PN-0001",
+            patient=patient,
+            facility=facility,
+            kind="order",
+            title="Order confirmed",
+            body="Your medication order is being prepared.",
+        )
+        models.PatientSupportTicket.objects.create(
+            ticket_number="PT-0001",
+            patient=patient,
+            facility=facility,
+            subject="Delivery update",
+            message="Need an ETA for my medication order.",
+            status=models.WorkflowStatus.IN_PROGRESS,
+            severity=models.SeverityLevel.MEDIUM,
+            channel="portal",
+        )
 
     def _seed_provider_operations(self, patient_link, memberships, facilities, now):
         patient = patient_link.patient
@@ -625,7 +595,15 @@ class Command(BaseCommand):
         models.ProviderAvailability.objects.create(
             provider=doctor,
             facility=facility,
-            slots=[{"id": "slot-1", "day": "Mon", "start": "09:00", "end": "13:00", "type": "In Facility"}],
+            slots=[
+                {"id": "nrb-m1", "day": "Monday", "start": "09:00", "end": "12:00", "type": "In Facility"},
+                {"id": "nrb-m2", "day": "Monday", "start": "14:00", "end": "17:00", "type": "In Facility"},
+                {"id": "nrb-tu", "day": "Tuesday", "start": "09:00", "end": "12:00", "type": "In Facility"},
+                {"id": "nrb-we", "day": "Wednesday", "start": "10:00", "end": "13:00", "type": "Virtual"},
+                {"id": "nrb-th", "day": "Thursday", "start": "09:00", "end": "11:00", "type": "Home Visit"},
+                {"id": "nrb-fr", "day": "Friday", "start": "08:00", "end": "12:00", "type": "In Facility"},
+                {"id": "nrb-sa", "day": "Saturday", "start": "10:00", "end": "14:00", "type": "Virtual"},
+            ],
             blocked_days=[],
         )
         models.ProviderClinicalSetting.objects.create(

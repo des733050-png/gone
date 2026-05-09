@@ -1,14 +1,27 @@
 // ─── screens/operations/Staff/molecules/StaffModals.js ───────────────────────
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, useWindowDimensions,
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+  useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { Btn } from '../../../../atoms/Btn';
 import { Icon } from '../../../../atoms/Icon';
 import { Input } from '../../../../atoms/Input';
 import { ResponsiveModal } from '../../../../molecules/ResponsiveModal';
 import { useTheme } from '../../../../theme/ThemeContext';
-import { updateStaff, addStaffMember, appendLog, invitePatient } from '../../../../api';
+import {
+  updateStaff,
+  addStaffMember,
+  appendLog,
+  invitePatient,
+  getFacilitySpecialties,
+} from '../../../../api';
 import { ROLE_LABELS } from '../../../../config/roles';
 import { INVITE_ROLE_OPTS, ROLE_DESC } from '../../../../constants/staff';
 
@@ -38,6 +51,61 @@ function sanitizeIsoDate(s) {
   return t;
 }
 
+function SpecialtyCatalogBlock({
+  C,
+  catalog,
+  loading,
+  selectedId,
+  onSelectId,
+  newName,
+  onChangeNew,
+}) {
+  return (
+    <>
+      <Text style={[styles.sectionLabel, { color: C.textMuted }]}>Specialty *</Text>
+      {loading ? (
+        <ActivityIndicator color={C.primary} style={{ marginVertical: 14 }} />
+      ) : null}
+      {!loading && catalog.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ marginBottom: 10 }}
+          contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
+        >
+          {catalog.map((row) => {
+            const on = selectedId === row.id;
+            return (
+              <TouchableOpacity
+                key={row.id}
+                onPress={() => {
+                  onSelectId(row.id);
+                  onChangeNew('');
+                }}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 20,
+                  borderWidth: 1,
+                  marginRight: 6,
+                  marginBottom: 6,
+                  backgroundColor: on ? C.primary : C.surface,
+                  borderColor: on ? C.primary : C.border,
+                }}
+              >
+                <Text style={{ color: on ? '#fff' : C.text, fontSize: 12, fontWeight: '600' }}>
+                  {row.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+      
+    </>
+  );
+}
+
 function modalHeader(C, title, subtitle, onClose) {
   return (
     <View style={styles.header}>
@@ -60,22 +128,60 @@ export function EditMemberModal({ visible, member, user, onClose, onSave }) {
   const { C } = useTheme();
   const [form, setForm] = useState({ ...member });
   const [saving, setSaving] = useState(false);
+  const [specCatalog, setSpecCatalog] = useState([]);
+  const [specLoading, setSpecLoading] = useState(false);
+  const [selectedSpecId, setSelectedSpecId] = useState('');
+  const [newSpecName, setNewSpecName] = useState('');
 
   useEffect(() => {
     if (visible && member) setForm({ ...member });
   }, [visible, member]);
+
+  useEffect(() => {
+    if (!visible || !member || member.role !== 'doctor') {
+      setSpecCatalog([]);
+      setSelectedSpecId('');
+      setNewSpecName('');
+      return undefined;
+    }
+    let cancelled = false;
+    setSpecLoading(true);
+    setSelectedSpecId(member.facility_specialty_id || '');
+    setNewSpecName('');
+    getFacilitySpecialties()
+      .then((rows) => {
+        if (!cancelled) setSpecCatalog(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setSpecCatalog([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSpecLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, member?.id, member?.role]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updated = await updateStaff(member.id, {
+      const patch = {
         first_name: sanitizeName(form.first_name),
         last_name: sanitizeName(form.last_name),
         phone: sanitizePhone(form.phone || ''),
-        specialty: form.specialty != null ? String(form.specialty).trim().slice(0, 120) : undefined,
-      });
+      };
+      if (member.role === 'doctor') {
+        if (selectedSpecId) patch.facility_specialty_id = selectedSpecId;
+        else if (String(newSpecName).trim())
+          patch.new_specialty_name = String(newSpecName).trim().slice(0, 120);
+        else
+          patch.specialty =
+            form.specialty != null ? String(form.specialty).trim().slice(0, 120) : '';
+      }
+      const updated = await updateStaff(member.id, patch);
       appendLog({
         staff: user ? `${user.first_name} ${user.last_name}` : 'Admin',
         staff_id: user?.id,
@@ -111,8 +217,16 @@ export function EditMemberModal({ visible, member, user, onClose, onSave }) {
           icon="phone"
           keyboardType="phone-pad"
         />
-        {form.specialty !== undefined && (
-          <Input label="Specialty" value={form.specialty || ''} onChangeText={(v) => set('specialty', v)} icon="activity" />
+        {member.role === 'doctor' && (
+          <SpecialtyCatalogBlock
+            C={C}
+            catalog={specCatalog}
+            loading={specLoading}
+            selectedId={selectedSpecId}
+            onSelectId={setSelectedSpecId}
+            newName={newSpecName}
+            onChangeNew={setNewSpecName}
+          />
         )}
       </ScrollView>
       <View style={styles.footer}>
@@ -138,7 +252,10 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [specialty, setSpecialty] = useState('');
+  const [selectedSpecId, setSelectedSpecId] = useState('');
+  const [newSpecName, setNewSpecName] = useState('');
+  const [specCatalog, setSpecCatalog] = useState([]);
+  const [specLoading, setSpecLoading] = useState(false);
   const [license, setLicense] = useState('');
   const [professionalNotes, setProfessionalNotes] = useState('');
   const [dob, setDob] = useState('');
@@ -157,7 +274,9 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
     setLastName('');
     setEmail('');
     setPhone('');
-    setSpecialty('');
+    // Specialty selection lives in selectedSpecId / newSpecName — no setSpecialty exists.
+    setSelectedSpecId('');
+    setNewSpecName('');
     setLicense('');
     setProfessionalNotes('');
     setDob('');
@@ -167,6 +286,25 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
     setErr('');
     setInviteSummary(null);
   }, [visible]);
+
+  useEffect(() => {
+    if (!visible || wizardStep !== 2 || role !== 'doctor') return undefined;
+    let cancelled = false;
+    setSpecLoading(true);
+    getFacilitySpecialties()
+      .then((rows) => {
+        if (!cancelled) setSpecCatalog(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setSpecCatalog([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSpecLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, wizardStep, role]);
 
   const roleOptions = useMemo(
     () => INVITE_ROLE_OPTS.map((r) => ({ value: r, label: ROLE_LABELS[r] || r })),
@@ -179,7 +317,9 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
     if (!fn) return 'First name is required.';
     if (!em) return 'A valid email is required.';
     if (role === 'doctor') {
-      if (String(specialty).trim().length < 2) return 'Specialty is required for doctors.';
+      if (!selectedSpecId && String(newSpecName).trim().length < 2) {
+        return 'Choose a specialty from the list or enter a new name (at least 2 characters).';
+      }
       if (String(license).trim().length < 3) return 'Licence number is required for doctors.';
     }
     if (role === 'patient') {
@@ -227,13 +367,19 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
         setInviteSummary(res);
         setPhase('done');
       } else {
+        const doctorSpec =
+          role === 'doctor'
+            ? selectedSpecId
+              ? { facility_specialty_id: selectedSpecId }
+              : { new_specialty_name: String(newSpecName).trim() }
+            : {};
         const member = await addStaffMember({
           role,
           first_name: sanitizeName(firstName),
           last_name: sanitizeName(lastName),
           email: sanitizeEmail(email),
           phone: sanitizePhone(phone),
-          specialty: role === 'doctor' ? String(specialty).trim() : '',
+          ...doctorSpec,
           license: role === 'doctor' ? String(license).trim() : '',
           professional_notes: ['billing_manager', 'lab_manager', 'receptionist'].includes(role)
             ? String(professionalNotes).trim().slice(0, 500)
@@ -251,7 +397,10 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
           type: 'staff',
         });
         onAdd(member);
-        if (member.invitation) {
+        // If a temporary password was generated, drop into the "done" phase
+        // so the admin can copy it before the modal closes. Re-using the
+        // inviteSummary slot keeps the existing UI surface.
+        if (member.temporary_password || member.invitation) {
           setInviteSummary(member);
           setPhase('done');
         } else {
@@ -356,7 +505,15 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
 
       {role === 'doctor' && (
         <>
-          <Input label="Specialty *" value={specialty} onChangeText={setSpecialty} icon="activity" />
+          <SpecialtyCatalogBlock
+            C={C}
+            catalog={specCatalog}
+            loading={specLoading}
+            selectedId={selectedSpecId}
+            onSelectId={setSelectedSpecId}
+            newName={newSpecName}
+            onChangeNew={setNewSpecName}
+          />
           <Input label="Professional licence no. *" value={license} onChangeText={setLicense} icon="award" />
         </>
       )}
@@ -479,7 +636,39 @@ export function AddMemberModal({ visible, user, onClose, onAdd, onPatientInvited
             ) : (
               <>
                 <Text style={[styles.kv, { color: C.text }]}>{`Email: ${inviteSummary?.email || sanitizeEmail(email)}`}</Text>
-                <Text style={[styles.kv, { color: C.text }]}>{`Temporary password: ${inviteSummary?.invitation?.temporary_password || '—'}`}</Text>
+                {/* Surface either the new staff temporary_password (set by the
+                    backend on create) or the legacy invitation.temporary_password
+                    payload (used in older flows). */}
+                <Text style={[styles.kv, { color: C.text }]}>
+                  {`Temporary password: ${inviteSummary?.temporary_password
+                                        || inviteSummary?.invitation?.temporary_password
+                                        || '—'}`}
+                </Text>
+                {(inviteSummary?.temporary_password) ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      try {
+                        if (typeof navigator !== 'undefined' && navigator?.clipboard) {
+                          navigator.clipboard.writeText(inviteSummary.temporary_password);
+                        }
+                      } catch (_) {}
+                    }}
+                    style={{
+                      alignSelf: 'flex-start', borderWidth: 1, borderColor: C.primary,
+                      paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
+                      marginTop: 4,
+                    }}
+                  >
+                    <Text style={{ color: C.primary, fontSize: 11, fontWeight: '700' }}>
+                      Copy password
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {inviteSummary?.password_note ? (
+                  <Text style={{ color: C.warning, fontSize: 11, marginTop: 6 }}>
+                    {inviteSummary.password_note}
+                  </Text>
+                ) : null}
                 {inviteSummary?.invitation?.login_url ? (
                   <Text style={[styles.kv, { color: C.text }]}>{`Login URL: ${inviteSummary.invitation.login_url}`}</Text>
                 ) : null}

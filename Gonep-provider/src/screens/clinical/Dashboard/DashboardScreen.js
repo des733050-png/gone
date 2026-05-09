@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
 import { useResponsive } from '../../../theme/responsive';
+import { T } from '../../../atoms/T';
+import { FloatingLabel } from '../../../atoms/FloatingLabel';
 import { Card } from '../../../atoms/Card';
 import { Btn } from '../../../atoms/Btn';
 import { Avatar } from '../../../atoms/Avatar';
@@ -168,12 +170,12 @@ export function DashboardScreen({ user, goTo }) {
         <View style={styles.heroDecor2} />
         <View style={styles.heroTop}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.heroGreeting}>Good morning 👋</Text>
-            <Text style={styles.heroName}>{user.first_name} {user.last_name}</Text>
-            <Text style={styles.heroSub}>{user.specialty || ROLE_LABELS[role]} · {user.facility}</Text>
-            {user.license && <Text style={styles.heroLicense}>Lic: {user.license}</Text>}
+            <T style={styles.heroGreeting}>Good morning</T>
+            <T style={styles.heroName}>{user.first_name} {user.last_name}</T>
+            <T style={styles.heroSub}>{user.specialty || ROLE_LABELS[role]} · {user.facility}</T>
+            {user.license && <T style={styles.heroLicense}>Lic: {user.license}</T>}
             <View style={[styles.rolePill, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{ROLE_LABELS[role]}</Text>
+              <T style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{ROLE_LABELS[role]}</T>
             </View>
           </View>
           <Avatar name={`${user.first_name} ${user.last_name}`} size={52} />
@@ -190,17 +192,14 @@ export function DashboardScreen({ user, goTo }) {
       </View>
 
       {/* Stats */}
-      {loading && <Text style={{ color: C.textMuted, marginBottom: 12 }}>Loading dashboard...</Text>}
-      {!!error && <Text style={{ color: C.danger, marginBottom: 12 }}>{error}</Text>}
+      {loading && <T style={{ color: C.textMuted, fontSize: 14, marginBottom: 12 }}>Loading dashboard…</T>}
+      {!!error && <T style={{ color: C.danger, fontSize: 14, marginBottom: 12 }}>{error}</T>}
       {statsToRender.length > 0 && (
         <View style={styles.statsRow}>
           {statsToRender.map((s) => (
             <Card key={s.label} hover onPress={() => goTo(s.page)} style={[styles.statCard, { flexBasis: statBasis }]}>
-              <View style={[styles.statIcon, { backgroundColor: s.bg }]}>
-                <Icon name={s.icon} lib={s.lib} size={20} color={s.color} />
-              </View>
-              <Text style={[styles.statValue, { color: C.text }]}>{s.value}</Text>
-              <Text style={[styles.statLabel, { color: C.textMuted }]}>{s.label}</Text>
+              <FloatingLabel label={String(s.value)} size="lg" style={{ marginBottom: 6 }} />
+              <T style={[styles.statLabel, { color: C.textMuted }]}>{s.label}</T>
             </Card>
           ))}
         </View>
@@ -221,16 +220,14 @@ const styles = StyleSheet.create({
   heroDecor1:   { position:'absolute', width:140, height:140, borderRadius:70, backgroundColor:'rgba(255,255,255,0.07)', top:-40, right:-20 },
   heroDecor2:   { position:'absolute', width:90,  height:90,  borderRadius:45, backgroundColor:'rgba(255,255,255,0.05)', bottom:-20, left:40 },
   heroTop:      { flexDirection:'row', alignItems:'flex-start', marginBottom:16 },
-  heroGreeting: { color:'rgba(255,255,255,0.75)', fontSize:13, marginBottom:4 },
-  heroName:     { color:'#fff', fontSize:20, fontWeight:'800', marginBottom:2 },
-  heroSub:      { color:'rgba(255,255,255,0.75)', fontSize:12, marginBottom:2 },
-  heroLicense:  { color:'rgba(255,255,255,0.55)', fontSize:11 },
+  heroGreeting: { color:'rgba(255,255,255,0.75)', fontSize:14, marginBottom:4 },
+  heroName:     { color:'#fff', fontSize:22, fontWeight:'800', marginBottom:2 },
+  heroSub:      { color:'rgba(255,255,255,0.75)', fontSize:13, marginBottom:2 },
+  heroLicense:  { color:'rgba(255,255,255,0.55)', fontSize:12 },
   rolePill:     { marginTop:8, alignSelf:'flex-start', paddingHorizontal:10, paddingVertical:3, borderRadius:99 },
   heroActions:  { flexDirection:'row', flexWrap:'wrap', gap:8 },
   heroBtn:      { marginRight:0 },
   statsRow:     { flexDirection:'row', flexWrap:'wrap', gap:12, marginBottom:20 },
-  statCard:     { padding:14, alignItems:'flex-start' },
-  statIcon:     { width:40, height:40, borderRadius:10, alignItems:'center', justifyContent:'center', marginBottom:10 },
-  statValue:    { fontSize:24, fontWeight:'800', marginBottom:2 },
-  statLabel:    { fontSize:12 },
+  statCard:     { padding:16, alignItems:'flex-start' },
+  statLabel:    { fontSize:13 },
 });

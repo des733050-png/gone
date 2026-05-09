@@ -1,6 +1,6 @@
 // ─── screens/operations/Staff/StaffScreen.js ─────────────────────────────────
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
 import { Icon } from '../../../atoms/Icon';
 import { Btn } from '../../../atoms/Btn';
@@ -79,6 +79,7 @@ export function StaffScreen({ filter: propFilter, user }) {
           onEdit={() => staff.setEditModal({ visible: true, member })}
           onSuspend={() => staff.handleSuspend(member.id)}
           onReactivate={() => staff.handleReactivate(member.id)}
+          onResetPassword={() => staff.handleResetPassword(member.id)}
         />
       ))}
 
@@ -105,6 +106,56 @@ export function StaffScreen({ filter: propFilter, user }) {
           onSave={staff.editMember}
         />
       )}
+
+      {/* Password reset reveal modal */}
+      <Modal
+        visible={!!staff.passwordReset}
+        transparent
+        animationType="fade"
+        onRequestClose={staff.dismissPasswordReset}
+      >
+        <View style={pwm.backdrop}>
+          <View style={[pwm.card, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Text style={[pwm.title, { color: C.text }]}>New temporary password</Text>
+            <Text style={{ color: C.textMuted, fontSize: 12, marginBottom: 10 }}>
+              For: <Text style={{ color: C.text, fontWeight: '700' }}>{staff.passwordReset?.memberName}</Text>{' '}
+              ({staff.passwordReset?.email})
+            </Text>
+            <View style={[pwm.pwBox, { backgroundColor: C.surface, borderColor: C.border }]}>
+              <Text selectable style={{ fontSize: 16, fontWeight: '700', color: C.text, letterSpacing: 1 }}>
+                {staff.passwordReset?.password || '—'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                try {
+                  if (typeof navigator !== 'undefined' && navigator?.clipboard) {
+                    navigator.clipboard.writeText(staff.passwordReset?.password || '');
+                  }
+                } catch (_) {}
+              }}
+              style={[pwm.copyBtn, { borderColor: C.primary }]}
+            >
+              <Icon name="copy" lib="feather" size={12} color={C.primary} />
+              <Text style={{ color: C.primary, fontSize: 12, fontWeight: '700', marginLeft: 6 }}>
+                Copy password
+              </Text>
+            </TouchableOpacity>
+            {staff.passwordReset?.note ? (
+              <Text style={{ color: C.warning, fontSize: 11, marginTop: 10 }}>{staff.passwordReset.note}</Text>
+            ) : null}
+            <Btn label="Done" onPress={staff.dismissPasswordReset} full style={{ marginTop: 14 }} />
+          </View>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }
+
+const pwm = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  card:     { width: '100%', maxWidth: 420, borderWidth: 1, borderRadius: 14, padding: 18 },
+  title:    { fontSize: 16, fontWeight: '800', marginBottom: 4 },
+  pwBox:    { borderWidth: 1.5, borderRadius: 10, padding: 14, alignItems: 'center', marginBottom: 8 },
+  copyBtn:  { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+});

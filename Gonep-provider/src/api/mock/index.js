@@ -7,6 +7,8 @@
 
 import {
   submitFacilityApplication,
+  requestPasswordReset,
+  verifyPasswordReset,
   fetchAppointments,
   createAppointment,
   fetchPrescriptions,
@@ -20,6 +22,9 @@ import {
   fetchAvailability,
   fetchActivityLogs,
   fetchStaff,
+  fetchFacilitySpecialties,
+  createFacilitySpecialty,
+  deleteFacilitySpecialty,
   markBillingPaid,
   markNotificationRead,
   markAllNotificationsRead,
@@ -45,6 +50,7 @@ import { DEMO_ACCOUNTS, MOCK_ANALYTICS } from '../../mock/data';
 export const getAppointments          = fetchAppointments;
 export { createAppointment };
 export { submitFacilityApplication };
+export { requestPasswordReset, verifyPasswordReset };
 export const getPrescriptions         = fetchPrescriptions;
 export const getPatients              = fetchPatients;
 export const searchPatientsForBooking = mockSearchPatientsForBooking;
@@ -55,6 +61,46 @@ export const getNotifications         = fetchNotifications;
 export const getAvailability          = fetchAvailability;
 export const getActivityLogs          = fetchActivityLogs;
 export const getStaff                 = fetchStaff;
+export const getFacilitySpecialties   = fetchFacilitySpecialties;
+export { createFacilitySpecialty, deleteFacilitySpecialty };
+export const updateFacilitySpecialty = async (id, payload) => ({ id, ...payload });
+
+// Booking flow helpers (mock)
+export const getBookingSpecialties = fetchFacilitySpecialties;
+export const getBookingDoctors = async (specialty) => {
+  const staff = await fetchStaff();
+  const doctors = (staff || []).filter((s) => s.role === 'doctor');
+  if (!specialty) return doctors;
+  return doctors.filter((d) => (d.specialty || '').toLowerCase() === specialty.toLowerCase());
+};
+export const searchBookingPatients = async (q) => {
+  const patients = await fetchPatients();
+  const query = (q || '').toLowerCase();
+  const results = (patients?.patients || patients || [])
+    .filter((p) => (
+      (p.name || '').toLowerCase().includes(query) ||
+      (p.phone || '').toLowerCase().includes(query) ||
+      (p.email || '').toLowerCase().includes(query) ||
+      (p.id || '').toLowerCase().includes(query)
+    ))
+    .slice(0, 15);
+  return { results };
+};
+export const getBookingDoctorSlots = async (providerCode, type) => {
+  const avail = await fetchAvailability();
+  const slots = (avail?.slots || []).filter((s) => !type || s.type === type);
+  return { provider_code: providerCode, slots, blocked_days: avail?.blocked_days || [] };
+};
+export const confirmAppointment = async (ref) => ({ reference: ref, status: 'confirmed' });
+export const rejectAppointment = async (ref) => ({ reference: ref, status: 'rejected' });
+export const rescheduleAppointment = async (ref, scheduledFor) => ({ reference: ref, scheduled_for: scheduledFor, status: 'confirmed' });
+export const assignAppointmentDoctor = async (ref, doctorId) => ({ reference: ref, doctor_id: doctorId });
+export const startAppointment = async (ref) => ({ reference: ref, status: 'in_progress', is_virtual: false, room_url: null });
+export const completeAppointment = async (ref) => ({ reference: ref, status: 'completed' });
+export const getAppointmentMeetingRoom = async (ref) => ({ appointment_ref: ref, room_url: `https://meet.jit.si/gonep-${ref}` });
+export const updateAppointment = async (ref, payload) => ({ reference: ref, ...payload });
+export const softDeleteAppointment = async (ref) => ({ reference: ref, deleted_at: new Date().toISOString() });
+export const restoreAppointment = async (ref) => ({ reference: ref, deleted_at: null });
 
 // ─── Write operations ─────────────────────────────────────────────────────────
 export { dispatchPrescription };
@@ -63,6 +109,27 @@ export { markNotificationRead, markAllNotificationsRead };
 export { addStock, reduceStock, updateInventoryItem, addInventoryItem, deactivateInventoryItem, toggleEcommerce };
 export { addAvailabilitySlot, removeAvailabilitySlot, toggleBlockDay };
 export { updateStaff, addStaffMember, suspendStaff, reactivateStaff };
+export const resetStaffPassword = async (id) => ({
+  id,
+  temporary_password: `Mock${Math.random().toString(36).slice(2, 9)}@1`,
+  password_note: 'Mock password — copy now, will not be shown again.',
+});
+export const registerFacilityPending = async (payload) => ({
+  facility_id: 'mock-facility-1',
+  facility_code: 'FAC-MOCK',
+  facility_status: 'pending',
+  admin_email: payload?.admin_email || payload?.email || 'admin@example.com',
+  next_step: 'login_then_upload_verification_documents',
+  detail: 'Mock: facility account created.',
+});
+export const getVerificationStatus = async () => ({
+  success: true,
+  data: { verification_status: 'UNVERIFIED', access: 'RESTRICTED', can_upload_verification_documents: true },
+});
+export const uploadVerificationDocument = async () => ({ success: true });
+export const deleteVerificationDocument = async () => ({ success: true });
+export const getOnboardingState = async () => ({ completed: false, should_show: false, verification_status: 'UNVERIFIED' });
+export const setOnboardingCompleted = async (completed = true) => ({ completed, should_show: false });
 
 // ─── Logging (mock — appends to in-memory log) ────────────────────────────────
 export { appendLog };

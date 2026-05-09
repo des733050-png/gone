@@ -7,7 +7,7 @@ export const SEO_CONFIG = {
   home:          { title: 'Dashboard',             description: 'Provider overview and key metrics' },
   appointments:  { title: 'Appointments',          description: 'Patient scheduling and visit management' },
   availability:  { title: 'Availability',          description: 'Doctor schedule and slot management' },
-  pharmacy:      { title: 'Pharmacy & Rx',         description: 'Prescription queue and dispatch' },
+  // pharmacy:   { title: 'Pharmacy & Rx',         description: 'Prescription queue and dispatch' },   // disabled
   emr:           { title: 'EMR',                   description: 'Electronic medical records' },
   lab:           { title: 'Lab Results',           description: 'Lab results and critical flags' },
   billing:       { title: 'Billing',               description: 'Invoices and payments' },
@@ -22,13 +22,12 @@ export const SEO_CONFIG = {
 };
 
 // ─── URL paths ────────────────────────────────────────────────────────────────
-// Used in App.js React Navigation linking config.
-// Each page id maps to a URL path (web only — native uses in-app navigation).
+// Logical path ids for SEO / future web deep-linking (navigation uses in-app state).
 export const PAGE_PATHS = {
   home:          '/dashboard',
   appointments:  '/appointments',
   availability:  '/availability',
-  pharmacy:      '/pharmacy',
+  // pharmacy:   '/pharmacy',   // disabled
   emr:           '/emr',
   lab:           '/lab',
   billing:       '/billing',

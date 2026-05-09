@@ -1,5 +1,20 @@
 import { API_CONFIG } from '../../config/env';
-import { buildCookieHeader, getStore, isNative, parseCookies } from './sessionStore';
+import { buildCookieHeader, clearStore, getStore, isNative, parseCookies } from './sessionStore';
+
+// Force-logout signal on 401/403. The app shell listens for this event and
+// resets to the login screen so the user can re-authenticate cleanly when
+// the server-side session has expired or the CSRF/cookie no longer matches.
+function signalSessionInvalid(reason) {
+  try { clearStore(); } catch (_) {}
+  if (typeof globalThis !== 'undefined' && typeof globalThis.dispatchEvent === 'function') {
+    try {
+      const evt = (typeof CustomEvent !== 'undefined')
+        ? new CustomEvent('gonep:session-invalid', { detail: { reason } })
+        : { type: 'gonep:session-invalid', detail: { reason } };
+      globalThis.dispatchEvent(evt);
+    } catch (_) {}
+  }
+}
 
 export function normalizeWebLoopbackUrl(url) {
   if (isNative()) return url;
@@ -63,11 +78,18 @@ export function createRequestClient(csrfManager) {
         requestHeaders['X-CSRFToken'] = csrfManager.getWebCsrfToken();
       }
 
+      // Always disable HTTP caching so manual refresh actually re-fetches.
+      if (method === 'GET' && !requestHeaders['Cache-Control']) {
+        requestHeaders['Cache-Control'] = 'no-cache';
+        requestHeaders['Pragma'] = 'no-cache';
+      }
+
       const response = await fetch(normalizeWebLoopbackUrl(url), {
         ...options,
         method,
         signal: controller.signal,
         credentials,
+        cache: options.cache || 'no-store',
         headers: requestHeaders,
       });
 
@@ -76,7 +98,13 @@ export function createRequestClient(csrfManager) {
         if (raw) parseCookies(raw);
       }
 
-      if (!response.ok) throw new Error(await extractErrorMessage(response));
+      if (!response.ok) {
+        if ((response.status === 401 || response.status === 403)
+            && !/\/auth\/(login|csrf|session|register|forgot-password)/.test(url)) {
+          signalSessionInvalid(`HTTP ${response.status} on ${method} ${url}`);
+        }
+        throw new Error(await extractErrorMessage(response));
+      }
       if (response.status === 204) return null;
       return response.json();
     } catch (err) {

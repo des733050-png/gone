@@ -3,6 +3,8 @@ import { Platform, Text, TouchableOpacity, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../theme/ThemeContext';
 import { Icon } from '../atoms/Icon';
+import dayjs from 'dayjs';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 
 function formatDisplayDate(value) {
   if (!value) return 'Select date';
@@ -18,23 +20,36 @@ export function DatePickerField({ label, value, min, onChange }) {
   const selectedDate = value ? new Date(`${value}T00:00:00`) : new Date();
 
   if (isWeb) {
+    const pickerValue = value ? dayjs(value, 'YYYY-MM-DD') : null;
+    const minValue = min ? dayjs(min, 'YYYY-MM-DD') : undefined;
     return (
       <View style={{ marginBottom: 12 }}>
-        {label ? <Text style={{ color: C.textMuted, fontSize: 12, marginBottom: 6 }}>{label}</Text> : null}
-        {React.createElement('input', {
-          type: 'date',
-          value: value || '',
-          min: min || '',
-          onChange: (event) => onChange?.(event?.target?.value || ''),
-          style: {
-            width: '100%',
-            border: `1px solid ${C.border}`,
-            borderRadius: '10px',
-            padding: '10px 12px',
-            backgroundColor: C.inputBg,
-            color: C.text,
-          },
-        })}
+        <DatePicker
+          label={label || 'Date'}
+          value={pickerValue}
+          minDate={minValue}
+          onChange={(next) => {
+            if (!next || !next.isValid?.()) return onChange?.('');
+            onChange?.(next.format('YYYY-MM-DD'));
+          }}
+          slotProps={{
+            textField: {
+              fullWidth: true,
+              size: 'small',
+              sx: {
+                '& .MuiInputBase-root': {
+                  backgroundColor: C.inputBg,
+                },
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: C.border },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: C.primaryMid },
+                '& .Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: C.primary,
+                  boxShadow: `0 0 0 3px ${C.shadowMd}`,
+                },
+              },
+            },
+          }}
+        />
       </View>
     );
   }

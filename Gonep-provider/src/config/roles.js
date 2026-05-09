@@ -48,7 +48,7 @@ const ROLE_ALIASES = {
  * 'pos' is a special page that replaces the entire shell for the POS role.
  */
 const ROLE_NAV = {
-  hospital_admin:  ['home', 'appointments', 'availability', 'pharmacy', 'emr', 'lab', 'billing', 'inventory', 'staff', 'logs', 'analytics', 'support', 'notifications', 'profile', 'settings'],
+  hospital_admin:  ['home', 'appointments', 'availability', 'pharmacy', 'emr', 'lab', 'billing', 'inventory', 'specializations', 'staff', 'logs', 'analytics', 'support', 'notifications', 'profile', 'settings'],
   doctor:          ['home', 'appointments', 'availability', 'pharmacy', 'emr', 'lab', 'support', 'notifications', 'profile'],
   billing_manager: ['home', 'billing', 'inventory', 'analytics', 'support', 'notifications', 'profile'],
   lab_manager:     ['home', 'lab', 'inventory', 'pharmacy', 'support', 'notifications', 'profile'],

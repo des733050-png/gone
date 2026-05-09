@@ -1,8 +1,13 @@
 import json
 import os
+import random
+import string
 import uuid
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.core.cache import cache
+from django.core.mail import send_mail
+from django.conf import settings as django_settings
 from django.db import transaction
 from django.core.files.storage import default_storage
 from django.utils.text import get_valid_filename
@@ -24,6 +29,7 @@ from core.models import (
     PatientFacilityAccess,
     PatientProfile,
     PatientUserLink,
+    ProviderMembership,
     ProviderProfile,
     ProviderSubRole,
     WorkflowStatus,
@@ -150,6 +156,31 @@ def _default_registration_facility():
     return facility
 
 
+def _normalize_portal(payload):
+    return str(payload.get("portal", "")).strip().lower()
+
+
+def _portal_must_be_patient_or_provider(portal):
+    if portal not in ("patient", "provider", "rider"):
+        return _json_error(
+            "Open the correct GONEP app (Patient, Provider, or Rider) to continue.",
+            status_code=400,
+        )
+    return None
+
+
+def _user_matches_password_reset_portal(user, portal):
+    if user.is_superuser:
+        return True
+    if portal == "patient":
+        return get_patient_link(user) is not None
+    if portal == "provider":
+        return get_staff_membership(user) is not None
+    if portal == "rider":
+        return get_rider_link(user) is not None
+    return False
+
+
 @ensure_csrf_cookie
 @require_GET
 def csrf_cookie_view(request):
@@ -173,12 +204,13 @@ def session_view(request):
     )
 
 
-@csrf_protect
+@csrf_exempt
 @require_POST
 def login_view(request):
     payload = _parse_request_json(request)
     email = str(payload.get("email", "")).strip().lower()
     password = payload.get("password", "")
+    portal = _normalize_portal(payload)
     if not email or not password:
         return _json_error("Email and password are required.")
 
@@ -190,8 +222,58 @@ def login_view(request):
     user = authenticate(
         request, username=matched_user.get_username(), password=password
     )
+    # Detect suspension explicitly so we can return a clear message instead
+    # of the generic "invalid email or password". We only reveal that an
+    # account exists once the password has been verified — otherwise an
+    # attacker could enumerate suspended emails.
+    suspended_msg = (
+        "This account is suspended. Please liaise with the administrator "
+        "of your facility for further details."
+    )
+    password_ok = matched_user.check_password(password)
+    if password_ok and not matched_user.is_active:
+        return _json_error(suspended_msg, status_code=403)
+    if password_ok and user is not None and not user.is_superuser:
+        try:
+            from core.models import ProviderMembership
+            has_provider = ProviderMembership.objects.filter(user=user).exists()
+            has_active_provider = ProviderMembership.objects.filter(
+                user=user, is_active=True
+            ).exists()
+            if has_provider and not has_active_provider:
+                return _json_error(suspended_msg, status_code=403)
+        except Exception:
+            pass
     if user is None or not user.is_active:
         return _json_error("Invalid email or password.", status_code=401)
+
+    # Portal role enforcement — prevent cross-portal logins.
+    # Superusers bypass portal routing so admin accounts can access any portal.
+    if not user.is_superuser:
+        err = _portal_must_be_patient_or_provider(portal)
+        if err:
+            return err
+        if portal == "patient":
+            if get_patient_link(user) is None:
+                return _json_error(
+                    "This account is not registered as a patient. "
+                    "Please use the Provider portal if you are a healthcare provider.",
+                    status_code=403,
+                )
+        elif portal == "provider":
+            if get_staff_membership(user) is None:
+                return _json_error(
+                    "This account is not registered as a provider. "
+                    "Please use the Patient portal if you are a patient.",
+                    status_code=403,
+                )
+        elif portal == "rider":
+            if get_rider_link(user) is None:
+                return _json_error(
+                    "This account is not registered as a rider. "
+                    "Please use the Patient or Provider portal as appropriate.",
+                    status_code=403,
+                )
 
     login(request, user)
     prime_user_facility_context(request, user)
@@ -210,6 +292,7 @@ def mobile_token_login_view(request):
     payload = _parse_request_json(request)
     email = str(payload.get("email", "")).strip().lower()
     password = payload.get("password", "")
+    portal = _normalize_portal(payload)
     if not email or not password:
         return _json_error("Email and password are required.")
 
@@ -221,10 +304,54 @@ def mobile_token_login_view(request):
     user = authenticate(
         request, username=matched_user.get_username(), password=password
     )
+    # Detect suspension explicitly so we can return a clear message instead
+    # of the generic "invalid email or password". We only reveal that an
+    # account exists once the password has been verified — otherwise an
+    # attacker could enumerate suspended emails.
+    suspended_msg = (
+        "This account is suspended. Please liaise with the administrator "
+        "of your facility for further details."
+    )
+    password_ok = matched_user.check_password(password)
+    if password_ok and not matched_user.is_active:
+        return _json_error(suspended_msg, status_code=403)
+    if password_ok and user is not None and not user.is_superuser:
+        try:
+            from core.models import ProviderMembership
+            has_provider = ProviderMembership.objects.filter(user=user).exists()
+            has_active_provider = ProviderMembership.objects.filter(
+                user=user, is_active=True
+            ).exists()
+            if has_provider and not has_active_provider:
+                return _json_error(suspended_msg, status_code=403)
+        except Exception:
+            pass
     if user is None or not user.is_active:
         return _json_error("Invalid email or password.", status_code=401)
 
+    # Portal role enforcement — prevent cross-portal logins.
+    # Superusers bypass portal routing so admin accounts can access any portal.
+    if not user.is_superuser:
+        err = _portal_must_be_patient_or_provider(portal)
+        if err:
+            return err
+        if portal == "patient":
+            if get_patient_link(user) is None:
+                return _json_error(
+                    "This account is not registered as a patient. "
+                    "Please use the Provider portal if you are a healthcare provider.",
+                    status_code=403,
+                )
+        elif portal == "provider":
+            if get_staff_membership(user) is None:
+                return _json_error(
+                    "This account is not registered as a provider. "
+                    "Please use the Patient portal if you are a patient.",
+                    status_code=403,
+                )
+
     token, _ = Token.objects.get_or_create(user=user)
+    prime_user_facility_context(request, user)
     return JsonResponse(
         {
             "authenticated": True,
@@ -469,6 +596,138 @@ def register_provider_facility_view(request):
     )
 
 
+# ─── 2-step facility onboarding ────────────────────────────────────────────────
+# A leaner registration that creates the Facility (PENDING) + admin User +
+# ProviderMembership without requiring document uploads. The admin can then
+# log in immediately and complete verification via the existing
+# ProviderVerificationSubmitView endpoint. Documents are reviewed by the
+# super admin; the admin sees status changes via the dashboard + notifications.
+@csrf_exempt
+@require_POST
+@transaction.atomic
+def register_facility_pending_view(request):
+    """
+    POST /api/v1/auth/register/facility-pending/
+
+    Body (JSON):
+      {
+        "name", "email", "phone", "location", "registration_no",
+        "admin_first_name", "admin_last_name", "admin_email",
+        "admin_phone" (optional), "admin_password"
+      }
+
+    Response: 201 with the created Facility + admin login email so the UI can
+    redirect to login.
+    """
+    payload = _parse_request_json(request)
+
+    name             = str(payload.get("name", "")).strip()
+    email            = str(payload.get("email", "")).strip().lower()
+    phone            = str(payload.get("phone", "")).strip()
+    location         = str(payload.get("location", "")).strip()
+    registration_no  = str(payload.get("registration_no", "")).strip()
+    admin_first_name = str(payload.get("admin_first_name", "")).strip()
+    admin_last_name  = str(payload.get("admin_last_name", "")).strip()
+    admin_email      = str(payload.get("admin_email", "")).strip().lower() or email
+    admin_phone      = str(payload.get("admin_phone", "")).strip() or phone
+    admin_password   = str(payload.get("admin_password", "")).strip()
+
+    if not name:
+        return _json_error("Hospital name is required.")
+    if not email:
+        return _json_error("Hospital email is required.")
+    if not registration_no:
+        return _json_error("Registration number is required.")
+    if not admin_first_name or not admin_last_name:
+        return _json_error("Administrator first and last name are required.")
+    if not admin_email:
+        return _json_error("Administrator email is required.")
+    if not admin_password or len(admin_password) < 8:
+        return _json_error("Administrator password must be at least 8 characters.")
+
+    if Facility.objects.filter(registration_no__iexact=registration_no).exists():
+        return _json_error(
+            "A facility with this registration number already exists."
+        )
+
+    user_model = get_user_model()
+    if user_model.objects.filter(email__iexact=admin_email).exists():
+        return _json_error(
+            "An account already exists for this administrator email. "
+            "Please log in instead, or use a different email."
+        )
+
+    # Optional Kenya phone normalization for both numbers (best-effort —
+    # we don't fail registration if the user supplied a non-Kenyan number).
+    try:
+        from portal_api.utils import normalize_kenya_phone
+        if phone:
+            try: phone = normalize_kenya_phone(phone)
+            except Exception: pass
+        if admin_phone:
+            try: admin_phone = normalize_kenya_phone(admin_phone)
+            except Exception: pass
+    except Exception:
+        pass
+
+    # 1. Facility (PENDING — verification submission required next)
+    facility = Facility.objects.create(
+        facility_code=_next_identifier(Facility, "facility_code", "FAC-", 4),
+        name=name,
+        email=email,
+        phone=phone,
+        location=location,
+        registration_no=registration_no,
+        status=FacilityStatus.PENDING,
+    )
+
+    # 2. Admin user account
+    admin_user = user_model.objects.create_user(
+        username=_build_unique_username(admin_email),
+        email=admin_email,
+        password=admin_password,
+        first_name=admin_first_name,
+        last_name=admin_last_name,
+        is_staff=True,
+        is_active=True,
+    )
+
+    # 3. ProviderProfile (admin's clinical-side identity)
+    admin_profile = ProviderProfile.objects.create(
+        provider_code=_next_identifier(ProviderProfile, "provider_code", "PRV-", 4),
+        facility=facility,
+        full_name=f"{admin_first_name} {admin_last_name}".strip(),
+        status=WorkflowStatus.CONFIRMED,
+        phone=admin_phone,
+        email=admin_email,
+        specialty="Facility Admin",
+    )
+
+    # 4. ProviderMembership (links user → facility → role)
+    ProviderMembership.objects.create(
+        user=admin_user,
+        provider=admin_profile,
+        facility=facility,
+        role=ProviderSubRole.FACILITY_ADMIN,
+        is_active=True,
+    )
+
+    return JsonResponse(
+        {
+            "facility_id":     str(facility.id),
+            "facility_code":   facility.facility_code,
+            "facility_status": facility.status,
+            "admin_email":     admin_email,
+            "next_step":       "login_then_upload_verification_documents",
+            "detail": (
+                "Facility account created. Please sign in with your "
+                "administrator email and password to complete verification."
+            ),
+        },
+        status=201,
+    )
+
+
 @csrf_protect
 @require_POST
 def switch_facility_context_view(request):
@@ -517,6 +776,84 @@ def switch_facility_context_view(request):
         )
 
     return _json_error("Facility context not available for this account.", status_code=403)
+
+
+def _generate_otp(length=6):
+    return "".join(random.choices(string.digits, k=length))
+
+
+def _generate_temp_password(length=10):
+    chars = string.ascii_letters.replace("l", "").replace("O", "").replace("I", "") + string.digits[2:]
+    return "".join(random.choices(chars, k=length))
+
+
+@csrf_exempt
+@require_POST
+def forgot_password_request_view(request):
+    payload = _parse_request_json(request)
+    portal = _normalize_portal(payload)
+    err = _portal_must_be_patient_or_provider(portal)
+    if err:
+        return err
+
+    email = str(payload.get("email", "")).strip().lower()
+    if not email or "@" not in email:
+        return _json_error("Enter a valid email address.")
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(email__iexact=email).first()
+    # Always return 200 to avoid email enumeration. Only send OTP when the account
+    # exists for this portal (patient vs provider).
+    if user and _user_matches_password_reset_portal(user, portal):
+        otp = _generate_otp()
+        cache.set(f"pwd_reset_otp:{portal}:{email}", otp, timeout=900)  # 15 min
+        try:
+            send_mail(
+                subject="Your GONEP Password Reset Code",
+                message=(
+                    f"Your one-time password reset code is: {otp}\n\n"
+                    "This code expires in 15 minutes.\n"
+                    "If you did not request a password reset, ignore this email."
+                ),
+                from_email=getattr(django_settings, "DEFAULT_FROM_EMAIL", "noreply@gonep.co.ke"),
+                recipient_list=[email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass  # fire-and-forget; log in production
+    return JsonResponse({"detail": "If that email is registered, an OTP has been sent."})
+
+
+@csrf_exempt
+@require_POST
+def forgot_password_verify_view(request):
+    payload = _parse_request_json(request)
+    portal = _normalize_portal(payload)
+    err = _portal_must_be_patient_or_provider(portal)
+    if err:
+        return err
+
+    email = str(payload.get("email", "")).strip().lower()
+    otp = str(payload.get("otp", "")).strip()
+    if not email or not otp:
+        return _json_error("Email and OTP are required.")
+
+    cache_key = f"pwd_reset_otp:{portal}:{email}"
+    stored_otp = cache.get(cache_key)
+    if not stored_otp or stored_otp != otp:
+        return _json_error("Invalid or expired OTP.", status_code=400)
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(email__iexact=email).first()
+    if user is None or not _user_matches_password_reset_portal(user, portal):
+        return _json_error("Invalid or expired OTP.", status_code=400)
+
+    temp_password = _generate_temp_password()
+    user.set_password(temp_password)
+    user.save(update_fields=["password"])
+    cache.delete(cache_key)
+
+    return JsonResponse({"temp_password": temp_password})
 
 
 class ProviderMeView(APIView):

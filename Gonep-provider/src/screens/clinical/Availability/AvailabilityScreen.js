@@ -1,5 +1,5 @@
 // ─── screens/clinical/Availability/AvailabilityScreen.js ─────────────────────
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useTheme } from '../../../theme/ThemeContext';
 import { Card } from '../../../atoms/Card';
@@ -16,6 +16,17 @@ import { s } from './styles';
 export function AvailabilityScreen({ user }) {
   const { C }  = useTheme();
   const av = useAvailability(user);
+  const [defaultDay, setDefaultDay] = useState(null);
+
+  const openAddModal = useCallback((day) => {
+    setDefaultDay(day || null);
+    av.setAddModalVis(true);
+  }, [av]);
+
+  const closeAddModal = useCallback(() => {
+    av.setAddModalVis(false);
+    setDefaultDay(null);
+  }, [av]);
 
   if (av.loading) {
     return (
@@ -91,7 +102,7 @@ export function AvailabilityScreen({ user }) {
           </Text>
           <Text style={{ fontSize: 12, color: C.textMuted }}>This week · tap a day to add slots</Text>
         </View>
-        <Btn label="+ Add slot" size="sm" onPress={() => av.setAddModalVis(true)} />
+        <Btn label="+ Add slot" size="sm" onPress={() => openAddModal(null)} />
       </View>
 
       {/* Receptionist notice */}
@@ -111,7 +122,7 @@ export function AvailabilityScreen({ user }) {
           day={day}
           slots={av.schedule.slots || []}
           blocked={(av.schedule.blocked_days || []).includes(day)}
-          onAddSlot={() => av.setAddModalVis(true)}
+          onAddSlot={(d) => openAddModal(d)}
           onRemoveSlot={av.handleRemoveSlot}
           onToggleBlock={av.handleToggleBlock}
         />
@@ -119,10 +130,12 @@ export function AvailabilityScreen({ user }) {
 
       <AddSlotModal
         visible={av.addModalVis}
-        onClose={() => av.setAddModalVis(false)}
+        onClose={closeAddModal}
         onSave={av.handleAddSlot}
         doctorName={!av.isDoctor ? av.schedule?.doctor_name : null}
         existingSlots={av.schedule?.slots || []}
+        blockedDays={av.schedule?.blocked_days || []}
+        defaultDay={defaultDay}
         setBy={av.setBy}
       />
     </ScreenContainer>

@@ -1,7 +1,6 @@
 // ─── hooks/usePOSTerminal.js ──────────────────────────────────────────────────
-import { useState, useCallback, useMemo, useRef } from 'react';
-import { MOCK_INVENTORY, MOCK_POS_TRANSACTIONS } from '../mock/data';
-import { savePosTransaction } from '../api';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { getInventory, getPosTransactions, savePosTransaction } from '../api';
 import { safeNum, calcLineTotal, receiptNo } from '../constants/pos';
 
 export function usePOSTerminal(user) {
@@ -11,19 +10,38 @@ export function usePOSTerminal(user) {
   const [payRef,       setPayRef]       = useState('');
   const [tab,          setTab]          = useState('sale');
   const [receiptData,  setReceiptData]  = useState(null);
-  const [transactions, setTransactions] = useState(MOCK_POS_TRANSACTIONS.map(t => ({ ...t })));
+  const [transactions, setTransactions] = useState([]);
+  const [inventory,    setInventory]    = useState([]);
   const [scanFeedback, setScanFeedback] = useState(null);
+  const [loadingInv,   setLoadingInv]   = useState(true);
+
+  // Load facility inventory and transaction history from API on mount
+  useEffect(() => {
+    let mounted = true;
+    setLoadingInv(true);
+    Promise.all([
+      getInventory().catch(() => []),
+      getPosTransactions().catch(() => []),
+    ]).then(([inv, txns]) => {
+      if (!mounted) return;
+      setInventory(Array.isArray(inv) ? inv : []);
+      setTransactions(Array.isArray(txns) ? txns : []);
+    }).finally(() => {
+      if (mounted) setLoadingInv(false);
+    });
+    return () => { mounted = false; };
+  }, []);
 
   const products = useMemo(
-    () => MOCK_INVENTORY.filter(i => i.active !== false && safeNum(i.stock) > 0),
-    []
+    () => inventory.filter(i => i.active !== false && safeNum(i.stock) > 0),
+    [inventory]
   );
 
   const filtered = useMemo(() =>
     products.filter(p =>
       !search ||
       p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.category.toLowerCase().includes(search.toLowerCase()) ||
+      (p.category || '').toLowerCase().includes(search.toLowerCase()) ||
       (p.barcode || '').includes(search)
     ), [products, search]
   );
@@ -141,8 +159,20 @@ export function usePOSTerminal(user) {
       created_at:     new Date().toISOString(),
       receipt_no:     receiptNo(),
     };
-    savePosTransaction(tx).catch(() => {});
-    setTransactions(prev => [tx, ...prev]);
+    savePosTransaction(tx)
+      .then((saved) => {
+        // Refresh local stock by deducting sold quantities
+        setInventory(prev => prev.map(item => {
+          const sold = tx.items.find(i => i.id === item.id);
+          if (!sold) return item;
+          const newStock = Math.max(0, safeNum(item.stock) - safeNum(sold.qty));
+          return { ...item, stock: newStock };
+        }));
+        setTransactions(prev => [saved || tx, ...prev]);
+      })
+      .catch(() => {
+        setTransactions(prev => [tx, ...prev]);
+      });
     setReceiptData(tx);
     setCart([]);
     setPayRef('');
@@ -175,6 +205,7 @@ export function usePOSTerminal(user) {
     receiptData, setReceiptData,
     transactions,
     scanFeedback,
+    loadingInv,
     // derived
     products, filtered, totals,
     todayTx, shiftTotal, payBreakdown,

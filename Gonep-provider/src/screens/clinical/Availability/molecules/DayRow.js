@@ -26,10 +26,15 @@ export function DayRow({ day, slots, blocked, onAddSlot, onRemoveSlot, onToggleB
               {blocked ? 'Unblock' : 'Block'}
             </Text>
           </TouchableOpacity>
-          {!blocked && (
+          {/* Add button is hidden on blocked days — must unblock first */}
+          {!blocked ? (
             <TouchableOpacity onPress={() => onAddSlot(day)} style={[s.addBtn, { backgroundColor: C.primaryLight }]}>
               <Icon name="plus" lib="feather" size={12} color={C.primary} />
             </TouchableOpacity>
+          ) : (
+            <View style={[s.addBtn, { backgroundColor: C.dangerLight, opacity: 0.6 }]}>
+              <Icon name="lock" lib="feather" size={11} color={C.danger} />
+            </View>
           )}
         </View>
       </View>
@@ -37,7 +42,9 @@ export function DayRow({ day, slots, blocked, onAddSlot, onRemoveSlot, onToggleB
       {/* Slot rows */}
       {daySlots.map(slot => {
         const tc      = slotTypeColor(slot.type, C);
-        const typeLbl = SLOT_TYPES.find(t => t.value === slot.type)?.label || slot.type;
+        // Legacy 'chat' slots are rendered as Virtual.
+        const lookupValue = slot.type === 'chat' ? 'virtual' : slot.type;
+        const typeLbl = SLOT_TYPES.find(t => t.value === lookupValue)?.label || lookupValue;
         return (
           <View key={slot.id} style={[s.slotRow, { backgroundColor: C.surface }]}>
             <View style={[s.timePill, { backgroundColor: tc.bg }]}>

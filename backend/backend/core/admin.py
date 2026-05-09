@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
@@ -24,6 +24,7 @@ from core.models import (
     ComplianceAudit,
     ExecutiveKPI,
     Facility,
+    FacilitySpecialty,
     InventoryBatch,
     Invoice,
     Note,
@@ -57,6 +58,9 @@ from core.models import (
     ProviderPrescriptionTask,
     ProviderProfile,
     ProviderProtocol,
+    ProviderVerificationDocument,
+    ProviderVerificationSubmission,
+    ProviderVerificationStatus,
     ProviderSubRole,
     ProviderSupportTicket,
     RevenueEntry,
@@ -284,6 +288,25 @@ class ReadOnlyAuditAdmin(CommandCentreModelAdmin):
         return request.user.is_superuser
 
 
+class ProviderVerificationDocumentInline(admin.TabularInline):
+    model = ProviderVerificationDocument
+    extra = 0
+    readonly_fields = (
+        "document_type",
+        "file",
+        "original_filename",
+        "content_type",
+        "file_size",
+        "locked",
+        "created_at",
+        "updated_at",
+    )
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 for auth_model in (User, Group):
     try:
         admin.site.unregister(auth_model)
@@ -305,6 +328,13 @@ class GroupAdmin(SuperuserOnlyAdminMixin, BaseGroupAdmin):
 class FacilityAdmin(CommandCentreModelAdmin):
     required_roles = FACILITY_ADMIN_ONLY
     facility_lookup = "pk"
+
+
+@admin.register(FacilitySpecialty)
+class FacilitySpecialtyAdmin(CommandCentreModelAdmin):
+    required_roles = FACILITY_ADMIN_ONLY
+    facility_lookup = "facility"
+    list_display = ("name", "facility", "created_at")
 
 
 @admin.register(PatientUserLink)
@@ -473,6 +503,86 @@ class PatientPortalNotificationAdmin(CommandCentreModelAdmin):
 @admin.register(ProviderProfile)
 class ProviderProfileAdmin(WorkflowModelAdmin):
     required_roles = PROVIDER_OPERATIONS_ROLES
+
+
+@admin.register(ProviderVerificationSubmission)
+class ProviderVerificationSubmissionAdmin(CommandCentreModelAdmin):
+    required_roles = FACILITY_ADMIN_ONLY
+    facility_lookup = "facility"
+    inlines = (ProviderVerificationDocumentInline,)
+    actions = ("approve_pending_submissions", "reject_pending_submissions")
+    readonly_fields = (
+        "facility",
+        "submitted_by",
+        "status",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    )
+
+    @admin.action(description="Approve pending provider verification submissions")
+    def approve_pending_submissions(self, request, queryset):
+        approved = 0
+        for submission in queryset.filter(status=ProviderVerificationStatus.PENDING):
+            submission.approve(reviewed_by=request.user)
+            approved += 1
+        self.message_user(
+            request,
+            f"Approved {approved} pending provider verification submission(s).",
+            messages.SUCCESS,
+        )
+
+    @admin.action(description="Reject pending provider verification submissions")
+    def reject_pending_submissions(self, request, queryset):
+        rejected = 0
+        missing_reason = 0
+        for submission in queryset.filter(status=ProviderVerificationStatus.PENDING):
+            if not submission.rejection_reason.strip():
+                missing_reason += 1
+                continue
+            submission.reject(
+                reviewed_by=request.user,
+                reason=submission.rejection_reason.strip(),
+            )
+            rejected += 1
+        if missing_reason:
+            self.message_user(
+                request,
+                (
+                    f"{missing_reason} submission(s) were not rejected because "
+                    "rejection_reason was empty."
+                ),
+                messages.ERROR,
+            )
+        if rejected:
+            self.message_user(
+                request,
+                f"Rejected {rejected} pending provider verification submission(s).",
+                messages.SUCCESS,
+            )
+
+
+@admin.register(ProviderVerificationDocument)
+class ProviderVerificationDocumentAdmin(CommandCentreModelAdmin):
+    required_roles = FACILITY_ADMIN_ONLY
+    readonly_fields = (
+        "submission",
+        "document_type",
+        "file",
+        "original_filename",
+        "content_type",
+        "file_size",
+        "locked",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ProviderAppointment)

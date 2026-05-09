@@ -15,7 +15,7 @@ export function Btn({
   loading = false,
   style,
 }) {
-  const { C } = useTheme();
+  const { C, typography } = useTheme();
   const { width } = useResponsive();
   const [hov, setHov] = useState(false);
 
@@ -109,7 +109,7 @@ export function Btn({
           </View>
         )
       )}
-      <Text style={{ color: v.color || '#fff', fontWeight: '700', fontSize: sz[size] }}>{label}</Text>
+      <Text style={{ color: v.color || '#fff', fontWeight: '700', fontSize: sz[size], fontFamily: typography.fontFamily }}>{label}</Text>
     </Pressable>
   );
 }

@@ -1,21 +1,32 @@
 // ─── screens/operations/Staff/molecules/PosSection.js ────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, TextInput, StyleSheet } from 'react-native';
 import { Card } from '../../../../atoms/Card';
 import { Badge } from '../../../../atoms/Badge';
 import { Btn } from '../../../../atoms/Btn';
 import { Icon } from '../../../../atoms/Icon';
+import { SectionLoader } from '../../../../atoms/SectionLoader';
 import { useTheme } from '../../../../theme/ThemeContext';
-import { createPosAccount, resetPosPassword, appendLog } from '../../../../api';
-import { MOCK_POS_ACCOUNTS } from '../../../../mock/data';
+import { createPosAccount, resetPosPassword, getPosAccounts, appendLog } from '../../../../api';
 
 export function PosSection({ user }) {
   const { C } = useTheme();
-  const [posAccounts, setPosAccounts] = useState(MOCK_POS_ACCOUNTS.map(a => ({ ...a })));
+  const [posAccounts, setPosAccounts] = useState([]);
+  const [loadingPos,  setLoadingPos]  = useState(true);
   const [addModal,    setAddModal]    = useState(false);
   const [name,        setName]        = useState('');
   const [email,       setEmail]       = useState('');
   const [saving,      setSaving]      = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoadingPos(true);
+    getPosAccounts()
+      .then((list) => { if (mounted) setPosAccounts(Array.isArray(list) ? list : []); })
+      .catch(() => { if (mounted) setPosAccounts([]); })
+      .finally(() => { if (mounted) setLoadingPos(false); });
+    return () => { mounted = false; };
+  }, []);
 
   const handleCreate = async () => {
     if (!name.trim() || !email.trim()) return;
@@ -52,6 +63,13 @@ export function PosSection({ user }) {
         <Btn label="+ New POS" size="sm" onPress={() => setAddModal(true)} />
       </View>
 
+      {loadingPos ? <SectionLoader label="Loading terminals…" /> : null}
+      {!loadingPos && posAccounts.length === 0 ? (
+        <Card style={{ padding: 14, marginBottom: 8 }}>
+          <Text style={{ color: C.text, fontWeight: '700', fontSize: 13, marginBottom: 4 }}>No POS terminals yet</Text>
+          <Text style={{ color: C.textMuted, fontSize: 12 }}>Tap "+ New POS" to create the first terminal for this facility.</Text>
+        </Card>
+      ) : null}
       {posAccounts.map(pos => (
         <Card key={pos.id} style={{ marginBottom: 8, padding: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>

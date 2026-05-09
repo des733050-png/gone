@@ -3,7 +3,7 @@
 // sub-items. Section headers and collapsible parents are driven by the
 // NAV_TREE in MainShell.js — Sidebar receives the filtered tree and renders it.
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Image, Animated,
@@ -163,8 +163,30 @@ export function Sidebar({
   const roleColor = roleColorKeys[ROLE_COLORS[user?.role]] || C.primary;
 
   const toggleGroup = useCallback((id) => {
-    setOpenGroups(prev => ({ ...prev, [id]: !prev[id] }));
+    setOpenGroups((prev) => {
+      if (prev[id]) {
+        return { ...prev, [id]: false };
+      }
+      return { [id]: true };
+    });
   }, []);
+
+  useEffect(() => {
+    const tree = navTree || (navItems ? [{ section: null, items: navItems }] : []);
+    for (const group of tree) {
+      for (const item of group.items || []) {
+        if (item.sub?.some((s) => s.id === activeId)) {
+          setOpenGroups({ [item.id]: true });
+          return;
+        }
+        if (item.id === activeId && item.sub?.length) {
+          setOpenGroups({ [item.id]: true });
+          return;
+        }
+      }
+    }
+    setOpenGroups({});
+  }, [activeId, navTree, navItems]);
 
   if (!open) return null;
 

@@ -4,7 +4,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { useResponsive } from '../theme/responsive';
 
 export function Badge({ label, color = 'primary', size = 'sm', style }) {
-  const { C } = useTheme();
+  const { C, typography } = useTheme();
   const { width } = useResponsive();
   const scale = width < 360 ? 1.12 : width < 640 ? 1.06 : 1;
   const map = {
@@ -32,8 +32,9 @@ export function Badge({ label, color = 'primary', size = 'sm', style }) {
       <Text
         style={{
           color: s.text,
-          fontSize: Math.round((size === 'sm' ? 11 : 13) * scale),
+          fontSize: Math.round((size === 'sm' ? 12 : 14) * scale),
           fontWeight: '700',
+          fontFamily: typography.fontFamily,
         }}
       >
         {label}

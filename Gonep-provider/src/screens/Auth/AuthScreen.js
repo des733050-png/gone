@@ -17,13 +17,21 @@ export function AuthScreen({ onAuth, appName }) {
   const [globalErr, setGlobalErr] = useState('');
   const [showDemo, setShowDemo] = useState(false);
 
-  const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); if (errors[k]) setErrors((e) => ({ ...e, [k]: '' })); };
+  const set = (k, v) => {
+    if (k === 'email' || k === 'password') {
+      v = typeof v === 'string' ? v.trimStart() : v;
+    }
+    setForm((f) => ({ ...f, [k]: v }));
+    if (errors[k]) setErrors((e) => ({ ...e, [k]: '' }));
+  };
 
   const validate = () => {
     const e = {};
-    if (!form.email) e.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email';
-    if (!form.password || form.password.length < 6) e.password = 'Minimum 6 characters';
+    const emailT = String(form.email || '').trim();
+    const passT = String(form.password || '').trim();
+    if (!emailT) e.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(emailT)) e.email = 'Enter a valid email';
+    if (!passT || passT.length < 6) e.password = 'Minimum 6 characters';
     return e;
   };
 
@@ -35,8 +43,10 @@ export function AuthScreen({ onAuth, appName }) {
     try {
       if (IS_MOCK) {
         await new Promise((r) => setTimeout(r, 400));
-        const match = DEMO_ACCOUNTS.find(a => a.user.email.toLowerCase() === form.email.toLowerCase());
-        if (match && form.password === APP_CONFIG.DEMO_PASSWORD) {
+        const match = DEMO_ACCOUNTS.find(
+          (a) => a.user.email.toLowerCase() === form.email.trim().toLowerCase()
+        );
+        if (match && form.password.trim() === APP_CONFIG.DEMO_PASSWORD) {
           onAuth(match.user);
           return;
         }
@@ -44,7 +54,7 @@ export function AuthScreen({ onAuth, appName }) {
       } else {
         const user = await loginProvider({
           email: form.email.trim(),
-          password: form.password,
+          password: form.password.trim(),
         });
         const hydratedUser = await getCurrentUser().catch(() => null);
         onAuth(hydratedUser || user);

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c 'from portal_api.provider_views import workflow_to_appointment_status, _patient_booking_status_for_provider; from core.models import WorkflowStatus; class A: pass *)",
+      "Bash(PYTHONIOENCODING=utf-8 python manage.py migrate core)",
+      "Bash(PYTHONIOENCODING=utf-8 python manage.py makemigrations core)",
+      "Bash(PYTHONIOENCODING=utf-8 python manage.py check)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

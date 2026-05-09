@@ -1,3 +1,5 @@
+import os
+import re
 import uuid
 
 from django.conf import settings
@@ -13,6 +15,7 @@ class WorkflowStatus(models.TextChoices):
     IN_PROGRESS = "in_progress", "In Progress"
     COMPLETED = "completed", "Completed"
     CANCELLED = "cancelled", "Cancelled"
+    REJECTED = "rejected", "Rejected"
 
 
 class SeverityLevel(models.TextChoices):
@@ -88,6 +91,25 @@ class ProviderSubRole(models.TextChoices):
     POS = "pos", "POS"
 
 
+class ProviderVerificationStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending"
+    VERIFIED = "VERIFIED", "Verified"
+    REJECTED = "REJECTED", "Rejected"
+
+
+class ProviderVerificationDocumentType(models.TextChoices):
+    # Core MoH/registry docs required for Kenyan facility verification.
+    REGISTRATION_CERTIFICATE = "REGISTRATION_CERTIFICATE", "Registration certificate"
+    OPERATING_LICENSE        = "OPERATING_LICENSE",        "Operating licence"
+    TAX_COMPLIANCE           = "TAX_COMPLIANCE",           "Tax compliance"
+    ACCREDITATION            = "ACCREDITATION",            "Accreditation"
+    # Generic / legacy
+    LICENSE      = "LICENSE",      "License"
+    REGISTRATION = "REGISTRATION", "Registration"
+    ID           = "ID",           "ID"
+    OTHER        = "OTHER",        "Other"
+
+
 class ProviderSupportTicketCategory(models.TextChoices):
     BUG = "Bug", "Bug"
     FEATURE_REQUEST = "Feature Request", "Feature Request"
@@ -125,6 +147,32 @@ class BaseTrackedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+def provider_verification_upload_path(instance, filename):
+    """
+    Store uploaded verification docs under a short deterministic path.
+
+    IMPORTANT: do NOT embed the raw client filename in the storage path.
+    Long filenames can exceed FileField.max_length and also create path
+    separator issues on Windows. We keep the original filename separately
+    in ProviderVerificationDocument.original_filename.
+    """
+    submission_id = instance.submission_id or "pending"
+    facility_id = (
+        instance.submission.facility_id
+        if instance.submission_id and instance.submission
+        else "unknown"
+    )
+
+    # Preserve extension (if any) but generate a short safe filename.
+    original = str(filename or "")
+    _, ext = os.path.splitext(original)
+    ext = (ext or "").lower()
+    if ext and (len(ext) > 12 or not re.fullmatch(r"\.[a-z0-9]+", ext)):
+        ext = ""
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    return f"provider_verifications/{facility_id}/{submission_id}/{safe_name}"
 
 
 class Tag(BaseTrackedModel):
@@ -617,6 +665,35 @@ class Facility(BaseTrackedModel):
         return self.name
 
 
+class FacilitySpecialty(BaseTrackedModel):
+    """Facility-scoped clinical specialty catalog for patient booking and staff assignment."""
+
+    facility = models.ForeignKey(
+        Facility,
+        on_delete=models.CASCADE,
+        related_name="specialties",
+    )
+    name = models.CharField(max_length=120)
+
+    class Meta:
+        ordering = ["facility__name", "name"]
+        unique_together = ("facility", "name")
+
+    def __str__(self):
+        return f"{self.name} @ {self.facility.name}"
+
+    @classmethod
+    def resolve_for_facility(cls, facility, name):
+        """Return an existing row (case-insensitive match) or create one; None if name is empty."""
+        name_norm = " ".join((name or "").split())
+        if not name_norm:
+            return None
+        existing = cls.objects.filter(facility=facility, name__iexact=name_norm).first()
+        if existing:
+            return existing
+        return cls.objects.create(facility=facility, name=name_norm[:120])
+
+
 class PatientProfile(BaseTrackedModel):
     patient_code = models.CharField(max_length=40, unique=True)
     full_name = models.CharField(max_length=120)
@@ -636,6 +713,10 @@ class PatientProfile(BaseTrackedModel):
     conditions = models.JSONField(default=list, blank=True)
     allergies = models.JSONField(default=list, blank=True)
     notes = models.TextField(blank=True)
+    # Name can only be edited once after registration. Once any change is
+    # accepted, name_locked is flipped true; further name changes are
+    # rejected at the API layer.
+    name_locked = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["full_name"]
@@ -702,9 +783,13 @@ class PatientPreference(BaseTrackedModel):
     )
     appointment_reminders = models.BooleanField(default=True)
     order_updates = models.BooleanField(default=True)
+    # Added to back the patient settings page (was 500-ing because these
+    # fields were referenced by the API but not on the model).
     lab_results_alerts = models.BooleanField(default=True)
     medication_refill_reminders = models.BooleanField(default=True)
     marketing_updates = models.BooleanField(default=False)
+    # Privacy mode masks record details / notification bodies in patient
+    # payloads. See build_patient_settings_payload + utils for behavior.
     privacy_mode = models.BooleanField(default=False)
 
     class Meta:
@@ -713,6 +798,12 @@ class PatientPreference(BaseTrackedModel):
 
     def __str__(self):
         return f"{self.patient.patient_code} preferences @ {self.facility.name}"
+
+
+class BookingSource(models.TextChoices):
+    PATIENT = "patient", "Patient"
+    PROVIDER = "provider", "Provider"
+    DOCTOR = "doctor", "Doctor"
 
 
 class PatientBooking(BaseTrackedModel):
@@ -725,10 +816,21 @@ class PatientBooking(BaseTrackedModel):
         on_delete=models.CASCADE,
         related_name="patient_bookings",
     )
+    provider = models.ForeignKey(
+        "ProviderProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="patient_bookings",
+    )
     status = models.CharField(
         max_length=16, choices=WorkflowStatus.choices, default=WorkflowStatus.DRAFT
     )
+    source = models.CharField(
+        max_length=20, choices=BookingSource.choices, default=BookingSource.PATIENT
+    )
     service_type = models.CharField(max_length=120, blank=True)
+    appointment_type = models.CharField(max_length=50, blank=True)
     channel = models.CharField(max_length=50, blank=True)
     provider_name = models.CharField(max_length=120, blank=True)
     provider_specialty = models.CharField(max_length=120, blank=True)
@@ -736,6 +838,16 @@ class PatientBooking(BaseTrackedModel):
     fee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     scheduled_for = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
+    # Virtual appointments only — populated T-5 min before meeting by send_virtual_meeting_links
+    daily_room_url = models.URLField(max_length=500, blank=True, null=True)
+    meeting_link_sent = models.BooleanField(default=False)
+    # Soft-delete (recycle bin) + auto-cancel marker — see ProviderAppointment.
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    auto_cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def is_virtual(self):
+        return (self.appointment_type or '').lower().strip() == 'virtual'
 
     class Meta:
         ordering = ["-created_at"]
@@ -972,7 +1084,6 @@ class PatientMedicationOrderItem(BaseTrackedModel):
 
 class PatientPortalNotification(BaseTrackedModel):
     notification_code = models.CharField(max_length=50, unique=True)
-    event_id = models.CharField(max_length=120, blank=True, null=True, db_index=True)
     patient = models.ForeignKey(
         PatientProfile, on_delete=models.CASCADE, related_name="portal_notifications"
     )
@@ -990,7 +1101,6 @@ class PatientPortalNotification(BaseTrackedModel):
 
     class Meta:
         ordering = ["-created_at"]
-        unique_together = ("patient", "facility", "event_id")
 
     def __str__(self):
         return f"{self.notification_code} - {self.title}"
@@ -1004,6 +1114,13 @@ class ProviderProfile(BaseTrackedModel):
         related_name="provider_profiles",
     )
     full_name = models.CharField(max_length=120)
+    facility_specialty = models.ForeignKey(
+        FacilitySpecialty,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="providers",
+    )
     specialty = models.CharField(max_length=120, blank=True)
     status = models.CharField(
         max_length=16, choices=WorkflowStatus.choices, default=WorkflowStatus.CONFIRMED
@@ -1014,9 +1131,25 @@ class ProviderProfile(BaseTrackedModel):
     years_experience = models.PositiveSmallIntegerField(default=0)
     payout_account = models.CharField(max_length=120, blank=True)
     bio = models.TextField(blank=True)
+    # Provider can edit their displayed name only once. After the first
+    # change this flag is set; further name changes must go through admin.
+    name_locked = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["full_name"]
+
+    def save(self, *args, **kwargs):
+        if self.facility_specialty_id:
+            fs = self.facility_specialty
+            if fs and self.facility_id and fs.facility_id != self.facility_id:
+                from django.core.exceptions import ValidationError
+
+                raise ValidationError(
+                    "Provider specialty must belong to the same facility as the provider profile."
+                )
+            if fs:
+                self.specialty = fs.name
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.provider_code} - {self.full_name}"
@@ -1042,6 +1175,10 @@ class ProviderMembership(BaseTrackedModel):
     )
     role = models.CharField(max_length=32, choices=ProviderSubRole.choices)
     is_active = models.BooleanField(default=True)
+    # Tracks whether the staff member has dismissed the post-verification
+    # "Getting started" onboarding (or completed it). Default False so the
+    # first sign-in after verification surfaces the guidance once.
+    onboarding_completed = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["facility__name", "user__username", "role"]
@@ -1049,6 +1186,94 @@ class ProviderMembership(BaseTrackedModel):
 
     def __str__(self):
         return f"{self.user.get_username()} - {self.role} @ {self.facility.name}"
+
+
+class ProviderVerificationSubmission(BaseTrackedModel):
+    facility = models.ForeignKey(
+        Facility,
+        on_delete=models.CASCADE,
+        related_name="verification_submissions",
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="provider_verification_submissions",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=ProviderVerificationStatus.choices,
+        default=ProviderVerificationStatus.PENDING,
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_provider_verifications",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def approve(self, reviewed_by=None):
+        self.status = ProviderVerificationStatus.VERIFIED
+        self.reviewed_by = reviewed_by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = ""
+        self.save(
+            update_fields=[
+                "status",
+                "reviewed_by",
+                "reviewed_at",
+                "rejection_reason",
+                "updated_at",
+            ]
+        )
+
+    def reject(self, reviewed_by=None, reason=""):
+        self.status = ProviderVerificationStatus.REJECTED
+        self.reviewed_by = reviewed_by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = reason
+        self.save(
+            update_fields=[
+                "status",
+                "reviewed_by",
+                "reviewed_at",
+                "rejection_reason",
+                "updated_at",
+            ]
+        )
+
+    def __str__(self):
+        return f"{self.facility.name} - {self.status}"
+
+
+class ProviderVerificationDocument(BaseTrackedModel):
+    submission = models.ForeignKey(
+        ProviderVerificationSubmission,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    document_type = models.CharField(
+        max_length=32,
+        choices=ProviderVerificationDocumentType.choices,
+    )
+    file = models.FileField(upload_to=provider_verification_upload_path, max_length=500)
+    original_filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=120, blank=True)
+    file_size = models.PositiveIntegerField(default=0)
+    locked = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.submission.facility.name} - {self.document_type}"
 
 
 class ProviderAppointment(BaseTrackedModel):
@@ -1068,6 +1293,16 @@ class ProviderAppointment(BaseTrackedModel):
     patient = models.ForeignKey(
         PatientProfile, on_delete=models.SET_NULL, null=True, blank=True
     )
+    patient_booking = models.OneToOneField(
+        "PatientBooking",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="provider_appointment",
+    )
+    source = models.CharField(
+        max_length=20, choices=BookingSource.choices, default=BookingSource.PROVIDER
+    )
     status = models.CharField(
         max_length=16, choices=WorkflowStatus.choices, default=WorkflowStatus.DRAFT
     )
@@ -1076,6 +1311,12 @@ class ProviderAppointment(BaseTrackedModel):
     patient_phone = models.CharField(max_length=32, blank=True)
     visit_reason = models.CharField(max_length=160, blank=True)
     notes = models.TextField(blank=True)
+    # Soft-delete (recycle bin). Hard delete is forbidden for staff; only the
+    # purge_recycle_bin management command removes records (after 90 days).
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Auto-cancel marker — set by mark_overdue_appointments when scheduled_for
+    # has elapsed and status is still DRAFT/CONFIRMED/IDLE.
+    auto_cancelled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -1357,7 +1598,6 @@ class ProviderBillingRecord(BaseTrackedModel):
 
 class ProviderPortalNotification(BaseTrackedModel):
     notification_code = models.CharField(max_length=50, unique=True)
-    event_id = models.CharField(max_length=120, blank=True, null=True, db_index=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -1379,7 +1619,6 @@ class ProviderPortalNotification(BaseTrackedModel):
 
     class Meta:
         ordering = ["-created_at"]
-        unique_together = ("user", "facility", "event_id")
 
     def __str__(self):
         return self.notification_code
@@ -1670,7 +1909,6 @@ class RiderRequestDecision(BaseTrackedModel):
 
 class RiderPortalNotification(BaseTrackedModel):
     notification_code = models.CharField(max_length=50, unique=True)
-    event_id = models.CharField(max_length=120, blank=True, null=True, db_index=True)
     facility = models.ForeignKey(
         Facility,
         on_delete=models.CASCADE,
@@ -1688,7 +1926,6 @@ class RiderPortalNotification(BaseTrackedModel):
 
     class Meta:
         ordering = ["-created_at"]
-        unique_together = ("rider", "facility", "event_id")
 
     def __str__(self):
         return f"{self.notification_code} - {self.title}"

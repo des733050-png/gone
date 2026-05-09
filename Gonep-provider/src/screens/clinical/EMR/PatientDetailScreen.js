@@ -43,7 +43,7 @@ export function PatientDetailScreen({ patient, user, onBack }) {
     ),
     lab:          () => <LabTab          labs={pd.patientLabs} />,
     appointments: () => <AppointmentsTab appointments={pd.patientAppts} />,
-    timeline:     () => <TimelineTab     timeline={pd.timeline} />,
+    timeline:     () => <TimelineTab     timeline={pd.timeline} sortOrder={pd.timelineSort} onChangeSortOrder={pd.setTimelineSort} />,
   };
 
   return (

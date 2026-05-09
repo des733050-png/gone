@@ -5,7 +5,7 @@ import {
   updateConsultation, cancelPrescription, appendLog,
   getClinicalSettings, getLabResults, getAppointments, getPrescriptions,
 } from '../api';
-import { roleCapabilities } from '../constants/emr';
+import { roleCapabilities, parseTimelineDate } from '../constants/emr';
 
 export function usePatientDetail(patient, user) {
   const [consultations,  setConsultations]  = useState([]);
@@ -17,10 +17,11 @@ export function usePatientDetail(patient, user) {
   const [consultModal,   setConsultModal]   = useState({ visible: false, existing: null });
   const [patientLabs,    setPatientLabs]    = useState([]);
   const [patientAppts,   setPatientAppts]   = useState([]);
+  // 'desc' = newest first (default), 'asc' = oldest first
+  const [timelineSort,   setTimelineSort]   = useState('desc');
 
-  const caps         = roleCapabilities(user?.role);
+  const caps = roleCapabilities(user?.role);
 
-  // Load admin-configured edit window
   useEffect(() => {
     getClinicalSettings()
       .then(s => { if (s?.edit_window_hours) setEditWindowHrs(s.edit_window_hours); })
@@ -38,9 +39,9 @@ export function usePatientDetail(patient, user) {
         getPrescriptions().catch(() => []),
       ]);
       setConsultations(consults || []);
-      setPatientLabs((labs || []).filter((l) => l.patient_id === patient?.id || l.patient === patient?.name));
-      setPatientAppts((appts || []).filter((a) => a.patient_id === patient?.id || a.patient === patient?.name));
-      setPrescriptions((rxs || []).filter((r) => r.patient_id === patient?.id || r.patient === patient?.name));
+      setPatientLabs((labs || []).filter(l => l.patient_id === patient?.id || l.patient === patient?.name));
+      setPatientAppts((appts || []).filter(a => a.patient_id === patient?.id || a.patient === patient?.name));
+      setPrescriptions((rxs || []).filter(r => r.patient_id === patient?.id || r.patient === patient?.name));
     } catch (err) {
       setError(err?.message || 'Unable to load patient detail.');
     } finally {
@@ -48,9 +49,7 @@ export function usePatientDetail(patient, user) {
     }
   }, [patient?.id, patient?.name]);
 
-  useEffect(() => {
-    loadConsultations();
-  }, [loadConsultations]);
+  useEffect(() => { loadConsultations(); }, [loadConsultations]);
 
   const handleCancelRx = useCallback(async (rxId) => {
     await cancelPrescription(rxId);
@@ -88,32 +87,37 @@ export function usePatientDetail(patient, user) {
     await loadConsultations();
   }, [patient, user, loadConsultations]);
 
-  // Build timeline
-  const timeline = [
-    ...consultations.map(c => ({ ...c, _type: 'consultation', _date: c.date })),
-    ...patientLabs.map(l =>   ({ ...l, _type: 'lab',          _date: l.date })),
-    ...prescriptions.map(r => ({ ...r, _type: 'rx',           _date: r.date })),
-    ...patientAppts.map(a => ({ ...a, _type: 'appointment',   _date: a.date })),
-  ];
+  // Build timeline — sort using parseTimelineDate so relative strings
+  // ("Today", "Yesterday", "Mon, Jun 15", "Fri, Apr 17 6:04 PM") all
+  // resolve to real timestamps before comparison.
+  const timeline = (() => {
+    const items = [
+      ...consultations.map(c => ({ ...c, _type: 'consultation', _date: c.date })),
+      ...patientLabs.map(l =>   ({ ...l, _type: 'lab',          _date: l.date })),
+      ...prescriptions.map(r => ({ ...r, _type: 'rx',           _date: r.date })),
+      ...patientAppts.map(a =>  ({ ...a, _type: 'appointment',  _date: a.date })),
+    ];
+    const dir = timelineSort === 'asc' ? 1 : -1;
+    items.sort((a, b) => (parseTimelineDate(a._date) - parseTimelineDate(b._date)) * dir);
+    return items;
+  })();
 
   const TABS = [
-    { id: 'overview',      label: 'Overview'  },
-    { id: 'consultations', label: 'Notes'     },
-    { id: 'prescriptions', label: 'Rx'        },
-    caps.canSeeLab   && { id: 'lab',          label: 'Lab'     },
-    caps.canSeeAppts && { id: 'appointments', label: 'Visits'  },
+    { id: 'overview',      label: 'Overview' },
+    { id: 'consultations', label: 'Notes'    },
+    { id: 'prescriptions', label: 'Rx'       },
+    caps.canSeeLab   && { id: 'lab',          label: 'Lab'    },
+    caps.canSeeAppts && { id: 'appointments', label: 'Visits' },
     { id: 'timeline',      label: 'Timeline'  },
   ].filter(Boolean);
 
   return {
-    // state
     consultations, prescriptions, editWindowHrs,
     loading, activeTab, setActiveTab,
     consultModal, setConsultModal,
     error,
-    // derived
     caps, patientLabs, patientAppts, timeline, TABS,
-    // actions
+    timelineSort, setTimelineSort,
     handleCancelRx, handleSaveConsultation,
   };
 }

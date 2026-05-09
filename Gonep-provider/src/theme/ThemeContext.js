@@ -9,6 +9,21 @@ import React, {
 import { Platform } from 'react-native';
 import { light, dark } from './colors';
 
+export const typography = {
+  fontFamily: Platform.select({
+    ios:     'Georgia',
+    android: 'serif',
+    web:     '"Times New Roman", Times, serif',
+    default: 'serif',
+  }),
+  h1:   22,
+  h2:   18,
+  h3:   15,
+  body: 14,
+  sm:   13,
+  xs:   11,
+};
+
 const STORAGE_KEY = 'gonep_theme_device';
 
 const ThemeCtx = createContext({ C: light, isDark: false, toggle: () => {} });
@@ -62,6 +77,7 @@ export function ThemeProvider({ children }) {
     isDark,
     toggle,
     themeLoaded: loaded,
+    typography,
   }), [isDark, toggle, loaded]);
 
   return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>;

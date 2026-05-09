@@ -42,14 +42,21 @@ export function useAvailability(user) {
   const setBy       = isRec ? 'receptionist' : 'self';
 
   const handleAddSlot = useCallback(async ({ day, start, end, type }) => {
-    await addAvailabilitySlot({ doctorId: activeDocId, slot: { day, start, end, type, setBy } });
-    appendLog({
-      staff: `${user.first_name} ${user.last_name}`, staff_id: user.id, role: user.role,
-      module: 'Availability', action: 'Schedule updated',
-      detail: `${day} ${start}–${end} ${type} slot added${isRec ? ' by receptionist' : ''}`,
-      type:   'availability',
-    });
-    await load();
+    try {
+      await addAvailabilitySlot({ doctorId: activeDocId, slot: { day, start, end, type, setBy } });
+      appendLog({
+        staff: `${user.first_name} ${user.last_name}`, staff_id: user.id, role: user.role,
+        module: 'Availability', action: 'Schedule updated',
+        detail: `${day} ${start}–${end} ${type} slot added${isRec ? ' by receptionist' : ''}`,
+        type:   'availability',
+      });
+      await load();
+      return { ok: true };
+    } catch (e) {
+      // Surface the backend validation message to the modal
+      const msg = e?.message || (e?.response?.data && JSON.stringify(e.response.data)) || 'Could not add slot.';
+      return { ok: false, error: msg };
+    }
   }, [activeDocId, user, setBy, isRec, load]);
 
   const handleRemoveSlot = useCallback(async (slotId) => {
