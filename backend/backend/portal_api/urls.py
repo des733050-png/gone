@@ -48,6 +48,8 @@ from portal_api.provider_views import (
     ProviderVerificationDocumentDeleteView,
     ProviderVerificationStatusView,
     ProviderVerificationSubmitView,
+    SpecializationListView,
+    SpecializationRequestView,
     ProviderAnalyticsView,
     ProviderAppointmentDetailView,
     ProviderAppointmentsView,
@@ -301,6 +303,16 @@ urlpatterns = [
     path("provider/staff/<str:staff_id>/suspend/",        ProviderStaffSuspendView.as_view(),       name="provider-staff-suspend"),
     path("provider/staff/<str:staff_id>/reactivate/",     ProviderStaffReactivateView.as_view(),    name="provider-staff-reactivate"),
     path("provider/staff/<str:staff_id>/reset-password/", ProviderStaffResetPasswordView.as_view(), name="provider-staff-reset-password"),
+
+    # Master specialization catalogue (public — patients + providers use it)
+    path("specializations/", SpecializationListView.as_view(), name="specializations"),
+
+    # Facility admin: request a new specialization be added to the catalogue
+    path(
+        "provider/specialization-requests/",
+        SpecializationRequestView.as_view(),
+        name="provider-specialization-requests",
+    ),
 
     path("provider/specialties/", ProviderFacilitySpecialtiesView.as_view(), name="provider-specialties"),
     path(

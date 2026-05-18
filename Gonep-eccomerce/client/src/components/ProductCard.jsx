@@ -1,0 +1,42 @@
+import { Link } from 'react-router-dom'
+
+function ProductCard({ product }) {
+
+  return (
+    <>
+      <div className="col">
+        <div
+          className="card product-card h-100 w-100 mb-3"
+        >
+          <img
+            src={`${import.meta.env.VITE_IMG_URL}${product.image_url}`}
+            alt={product?.name}
+            className="card-img-top "
+            style={{ maxWidth: "400px", height: "250px", margin: "auto" }}
+            loading='lazy'
+          />
+          <div className="card-body P-2">
+            <div
+              className="card-title product-name text-success fw-bold mb-0"
+              title={product?.name}
+            >
+              {product?.name}
+            </div>
+            <div className="card-text product-desc text-muted mb-3">{product.description}</div>
+            <div className="mt-auto text-center">
+              <Link
+                to={`/product-details/${product._id}`}
+                className="view-btn d-block w-100"
+              >
+                View
+              </Link>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+};
+
+export default ProductCard;

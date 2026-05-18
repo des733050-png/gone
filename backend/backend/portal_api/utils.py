@@ -186,9 +186,14 @@ def build_provider_verification_payload(facility):
             if status == ProviderVerificationStatus.VERIFIED
             else ACCESS_RESTRICTED
         ),
+        # PENDING is included so providers can add/replace documents while
+        # their submission is awaiting review (e.g. they only uploaded 1 of 4
+        # required files before closing the tab, or they want to update a doc
+        # before the admin has finished reviewing).
         "can_upload_verification_documents": status in {
             VERIFICATION_UNVERIFIED,
             ProviderVerificationStatus.REJECTED,
+            ProviderVerificationStatus.PENDING,
         },
         "reviewed_at":               reviewed_at,
         "rejection_reason":          rejection_reason,
@@ -416,6 +421,9 @@ def build_provider_payload(membership):
         "active_facility_name": membership.facility.name,
         "accessible_facilities": [facility_payload] if facility_payload else [],
         "onboarding_completed": bool(membership.onboarding_completed),
+        # facility_status: "pending" | "approved" | "suspended" — used by the
+        # frontend to detect admin-applied suspension while the user is active.
+        "facility_status":      membership.facility.status,
         **verification_payload,
     }
 

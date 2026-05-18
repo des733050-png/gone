@@ -1,0 +1,195 @@
+import '@/style/Checkout.css'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useCart } from '@/context/CartContext'
+
+import { getCart as getCartApi } from '@/services/cartService'
+import { placeOrder as placeOrderApi } from '@/services/orderService'
+
+
+function Checkout() {
+
+  document.title = ('Checkout Page | Gonep');
+
+  const { fetchCart } = useCart()
+
+  const navigate = useNavigate();
+
+  const [error, setError] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('COD');
+
+  const [address, setAddress] = useState({
+    name: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    pincode: ''
+  });
+
+  const [summary, setSummary] = useState({
+    subtotal: 0,
+    shipping: 40,
+    total: 0
+  })
+
+  useEffect(() => { fetchCartData(), handlePlaceOrder() }, []);
+
+  const fetchCartData = async () => {
+    try {
+      const response = await getCartApi();
+      const cartItems = response.data;
+
+      const subtotal = cartItems.reduce(
+        (sum, item) => sum + (item.product?.price || 0) * item.quantity,
+        0
+      );
+      const shipping = subtotal > 5000 ? 0 : 40;
+
+      setSummary({
+        subtotal,
+        shipping,
+        total: subtotal + shipping
+      });
+
+    }
+    catch (err) {
+      console.error(err);
+      setError(err);
+    }
+  }
+
+
+
+
+  const handleChange = (e) => {
+    setAddress({
+      ...address,
+      [e.target?.name]: e.target.value
+    })
+  }
+
+
+  const handlePlaceOrder = async () => {
+    try {
+      await placeOrderApi({ shippingAddress: address, paymentMethod });
+      await fetchCart();
+      navigate('/order-success');
+
+    } catch (err) {
+      setError(err);
+    }
+  };
+
+  return (
+    <div className="container py-4">
+      <h3 className="mb-4">Checkout</h3>
+
+      <div className="row">
+        <div className="col-12 col-lg-8">
+
+          <div className="order-box p-3 mb-4">
+            <h5>Delivery Address</h5>
+
+            <div className="row g-3 mt-2">
+              <div className="col-md-6">
+                <input name="name" className="form-control" placeholder="Full Name" onChange={handleChange} />
+              </div>
+
+              <div className="col-md-6">
+                <input name="phone" className="form-control" placeholder="Mobile Number" onChange={handleChange} />
+              </div>
+
+              <div className="col-12">
+                <input name="address" className="form-control" placeholder="Address" onChange={handleChange} />
+              </div>
+
+              <div className="col-md-4">
+                <input name="city" className="form-control" placeholder="City" onChange={handleChange} />
+              </div>
+
+              <div className="col-md-4">
+                <input name="state" className="form-control" placeholder="State" onChange={handleChange} />
+              </div>
+
+              <div className="col-md-4">
+                <input name="pincode" className="form-control" placeholder="Pincode" onChange={handleChange} />
+              </div>
+            </div>
+          </div>
+
+
+          <div className="order-box p-3">
+            <h5>Payment Method</h5>
+
+            <div className="form-check mt-2">
+              <input
+                className="form-check-input"
+                type="radio"
+                value="COD"
+                checked={paymentMethod === 'COD'}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              />
+              <label className="form-check-label">
+                Cash on Delivery
+              </label>
+            </div>
+
+            <div className="form-check mt-2">
+              <input
+                className="form-check-input"
+                type="radio"
+                value="ONLINE"
+                checked={paymentMethod === 'ONLINE'}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              />
+              <label className="form-check-label">
+                Online Payment (Demo)
+              </label>
+            </div>
+          </div>
+
+        </div>
+
+        <div className="col-12 col-lg-4">
+          <div className="summary p-3">
+            <h5>Order Summary</h5>
+
+            <div className="d-flex justify-content-between">
+              <span>Subtotal</span>
+              <span>₹{summary.subtotal}</span>
+            </div>
+
+            <div className="d-flex justify-content-between">
+              <span>Shipping</span>
+              <span>₹{summary.shipping}</span>
+            </div>
+
+            <hr />
+
+            <div className="d-flex justify-content-between fw-bold">
+              <span>Total</span>
+              <span>₹{summary.total}</span>
+            </div>
+
+            <button
+              className="btn btn-success w-100 mt-3"
+              onClick={handlePlaceOrder}
+            >
+              Place Order
+            </button>
+
+            {error && (
+              <div className="text-danger text-center mt-2">
+                {error}
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+export default Checkout

@@ -80,7 +80,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
+    "core.middleware.PortalSessionMiddleware",  # portal-aware; replaces django.contrib.sessions.middleware.SessionMiddleware
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -279,6 +279,21 @@ JAZZMIN_UI_TWEAKS = {
 GONEP_PORTAL_LOGIN_URL = os.getenv("GONEP_PORTAL_LOGIN_URL", "")
 GONEP_PATIENT_LOGIN_URL = os.getenv("GONEP_PATIENT_LOGIN_URL", "")
 DAILY_API_KEY = os.getenv("DAILY_API_KEY", "")
+
+# ── Email / SMTP ──────────────────────────────────────────────────────────────
+# Set EMAIL_HOST (and friends) in your .env or PythonAnywhere WSGI env.
+# While EMAIL_HOST is empty the backend falls back to a silent no-op so
+# development never crashes on missing SMTP credentials.
+EMAIL_BACKEND       = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST          = os.getenv("EMAIL_HOST", "")          # e.g. smtp.gmail.com
+EMAIL_PORT          = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS       = os.getenv("EMAIL_USE_TLS",  "True").lower()  in {"1", "true", "yes", "on"}
+EMAIL_USE_SSL       = os.getenv("EMAIL_USE_SSL",  "False").lower() in {"1", "true", "yes", "on"}
+EMAIL_HOST_USER     = os.getenv("EMAIL_HOST_USER",     "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL  = os.getenv("DEFAULT_FROM_EMAIL",  "Gonep Healthcare <noreply@gonep.health>")
+# Where support-ticket notification emails are sent (defaults to the SMTP user)
+SUPPORT_NOTIFY_EMAIL = os.getenv("SUPPORT_NOTIFY_EMAIL", os.getenv("EMAIL_HOST_USER", ""))
 
 # ── Production security ───────────────────────────────────────────────────────
 if not DEBUG:

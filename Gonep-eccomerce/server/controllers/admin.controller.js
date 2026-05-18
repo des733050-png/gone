@@ -1,0 +1,344 @@
+const Category = require('../models/category.model');
+const Brand = require('../models/brand.model');
+const User = require('../models/auth.model');
+const Order = require('../models/order.models');
+
+const sendEmail = require('../utils/sendEmail');
+const { approveSellerTemplate } = require('../utils/emailTemplates/approveSellerTemplate');
+const { orderStatusTemplate } = require('../utils/emailTemplates/orderStatusTemplate');
+
+exports.addCategory = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name) return res.status(400).json({ error: 'category is required' });
+    const existing = await Category.findOne({ name });
+    if (existing) return res.status(400).json({ error: 'A Category with this name already exists' });
+    const isAdmin = req.userData?.role === 'admin';
+    const isApproved = isAdmin; // admin-created = auto-approved
+    const createdBy = req.userData?.id;
+    const category = await Category.create({ name, description, isAdmin, isApproved, createdBy });
+    res.status(201).json({ message: 'Category created', category });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create category' });
+  }
+};
+
+exports.getCategories = async (req, res) => {
+  try {
+    const categories = await Category.find();
+    res.status(200).json(categories);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch Categories' });
+  }
+};
+
+exports.getCategoryById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const category = await Category.findById(id);
+    res.status(200).json(category);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: 'Failed to fetch category' });
+  }
+};
+
+exports.updateCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body;
+    const category = await Category.findById(id);
+    const existing = await Category.findOne({ name, _id: { $ne: id } });
+    if (existing) return res.status(400).json({ error: 'A category with this name already exists' });
+    if (name !== undefined) category.name = name;
+    if (description !== undefined) category.description = description;
+    await category.save();
+    return res.status(200).json(category);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: 'Failed to update the category' });
+  }
+};
+
+exports.deleteCategory = async (req, res) => {
+  try {
+    const id = req.params.id;
+    await Category.findByIdAndDelete(id);
+    res.status(200).json({ message: 'category deleted' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete category' });
+  }
+};
+
+// Approve a seller-created category
+exports.approveCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const category = await Category.findByIdAndUpdate(id, { isApproved: true }, { new: true });
+    if (!category) return res.status(404).json({ error: 'Category not found' });
+    res.status(200).json({ message: 'Category approved', category });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to approve category' });
+  }
+};
+
+// Get pending (seller-submitted, not yet approved) categories
+exports.getPendingCategories = async (req, res) => {
+  try {
+    const categories = await Category.find({ isAdmin: false, isApproved: false }).populate('createdBy', 'fullName shopName');
+    res.status(200).json(categories);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch pending categories' });
+  }
+};
+
+exports.addBrand = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name) return res.status(400).json({ error: 'Brand name is required' });
+    const existing = await Brand.findOne({ name });
+    if (existing) return res.status(400).json({ error: 'A brand with this name already exists' });
+    const isAdmin = req.userData?.role === 'admin';
+    const isApproved = isAdmin;
+    const createdBy = req.userData?.id;
+    const brand = await Brand.create({ name, description, isAdmin, isApproved, createdBy });
+    res.status(201).json({ message: 'Brand created', brand });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create brand' });
+  }
+};
+
+exports.getBrands = async (req, res) => {
+  try {
+    const brands = await Brand.find();
+    res.status(200).json(brands);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch the brands' });
+  }
+};
+
+exports.getBrandById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const brand = await Brand.findById(id);
+    res.status(200).json(brand);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: 'Failed to fetch the brand' });
+  }
+};
+
+exports.updateBrand = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body;
+    const brand = await Brand.findById(id);
+    const existing = await Brand.findOne({ name, _id: { $ne: id } });
+    if (existing) return res.status(400).json({ error: 'A brand with this name already exists' });
+    if (name !== undefined) brand.name = name;
+    if (description !== undefined) brand.description = description;
+    await brand.save();
+    res.status(200).json(brand);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update brand' });
+  }
+};
+
+exports.deleteBrand = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await Brand.findByIdAndDelete(id);
+    res.status(200).json({ message: 'Brand deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete brand' });
+  }
+};
+
+// Approve a seller-created brand
+exports.approveBrand = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const brand = await Brand.findByIdAndUpdate(id, { isApproved: true }, { new: true });
+    if (!brand) return res.status(404).json({ error: 'Brand not found' });
+    res.status(200).json({ message: 'Brand approved', brand });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to approve brand' });
+  }
+};
+
+// Get pending (seller-submitted, not yet approved) brands
+exports.getPendingBrands = async (req, res) => {
+  try {
+    const brands = await Brand.find({ isAdmin: false, isApproved: false }).populate('createdBy', 'fullName shopName');
+    res.status(200).json(brands);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch pending brands' });
+  }
+};
+
+exports.getUsers = async (req, res) => {
+  try {
+    const users = await User.find({ role: 'user' }).sort({ name: 1 });
+    if (!users) return res.status(400).json({ error: 'users not found' });
+    res.status(200).json(users);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+};
+
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findByIdAndDelete(id);
+    if (!user) return res.status(400).json('user not found');
+    res.status(200).json({ messsage: 'user deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+};
+
+exports.toggleBlockUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return res.status(400).json('user not found');
+    user.isBlocked = !user.isBlocked;
+    await user.save();
+    res.status(200).json({ message: user.isBlocked ? "user blocked" : "user unblocked" });
+  } catch (err) {
+    console.error('failed to block or unblock user');
+    res.status(500).json({ error: 'Failed to block or unblock user' });
+  }
+};
+
+exports.getSellers = async (req, res) => {
+  try {
+    const sellers = await User.find({ role: 'seller', isApproved: true }).sort({ name: 1 });
+    if (!sellers) return res.status(400).json({ error: 'sellers not found' });
+    res.status(200).json(sellers);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch sellers' });
+  }
+};
+
+exports.deleteSeller = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const seller = await User.findByIdAndDelete(id);
+    if (!seller) return res.status(400).json({ error: 'Seller not found' });
+    res.status(200).json({ messsage: 'seller deleted successfully' });
+  } catch (err) {
+    console.error('Failed to delete seller');
+    res.status(500).json({ error: 'Failed to delete seller' });
+  }
+};
+
+exports.toggleBlockSeller = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const seller = await User.findById(id);
+    if (!seller) return res.status(400).json({ error: 'seller not found' });
+    seller.isBlocked = !seller.isBlocked;
+    await seller.save();
+    res.status(200).json({ message: seller.isBlocked ? "seller blocked" : "seller unblocked" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to block or unblock seller' });
+  }
+};
+
+exports.getAllOrders = async (req, res) => {
+  try {
+    const orders = await Order.find()
+      .sort({ createdAt: -1 })
+      .populate("user", "fullName email")
+      .populate("items.product", "name price")
+      .populate("items.seller", "shopName");
+    res.status(200).json(orders);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch orders" });
+  }
+};
+
+exports.updateOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { status } = req.body;
+    const order = await Order.findById(orderId).populate('user', 'fullName email');
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (status === "delivered") {
+      const allItemsDelivered = order.items.every(item => item.status === "delivered");
+      if (!allItemsDelivered) return res.status(400).json({ error: "All items must be delivered first" });
+    }
+    if (status === "cancelled") {
+      order.items.forEach(item => { item.status = "cancelled"; });
+    }
+    order.status = status;
+    await order.save();
+    const userEmail = order?.user?.email;
+    const mailContent = orderStatusTemplate(order.user.fullName, status, orderId);
+    await sendEmail(userEmail, 'Order Status', mailContent);
+    res.json({ message: "Order status updated", order });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update status" });
+  }
+};
+
+exports.getAdminDashboard = async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments({ role: 'user' });
+    const totalSellers = await User.countDocuments({ role: 'seller' });
+    const totalCategories = await Category.countDocuments();
+    const totalBrands = await Brand.countDocuments();
+    const totalOrders = await Order.countDocuments();
+    const orders = await Order.find({}, 'total');
+    const revenue = orders.reduce((acc, order) => acc + order.total, 0);
+    const pendingCategories = await Category.countDocuments({ isAdmin: false, isApproved: false });
+    const pendingBrands = await Brand.countDocuments({ isAdmin: false, isApproved: false });
+    res.status(200).json({ totalUsers, totalSellers, totalCategories, totalBrands, totalOrders, revenue, pendingCategories, pendingBrands });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+};
+
+exports.getPendingSellers = async (req, res) => {
+  try {
+    const sellers = await User.find({ role: 'seller', isApproved: false }).sort({ createdAt: -1 });
+    return res.status(200).json(sellers);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch pending seller' });
+  }
+};
+
+exports.approveSellers = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const seller = await User.findById(id);
+    if (!seller) return res.status(404).json({ error: 'Seller not found' });
+    seller.isApproved = true;
+    await seller.save();
+    const mailContent = approveSellerTemplate(seller.fullName);
+    await sendEmail(seller?.email, 'Your Seller Account is Approved!', mailContent);
+    res.status(201).json({ message: "Seller approved and email sent successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+
+

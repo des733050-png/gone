@@ -368,18 +368,14 @@ export function SettingsScreen({ user, onLogout }) {
 
       <Text style={[styles.sectionLabel, { color: C.textMuted }]}>SECURITY</Text>
       <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
-        <View style={[styles.settingRow, { borderBottomColor: C.divider, borderBottomWidth: 1 }]}>
+        <View style={[styles.settingRow, { borderBottomColor: C.divider, borderBottomWidth: 1, opacity: 0.6 }]}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.settingLabel, { color: C.text }]}>Two-Factor Auth</Text>
-            <Text style={[styles.settingDesc, { color: C.textMuted }]}>Extra login security via SMS or app</Text>
+            <Text style={[styles.settingDesc, { color: C.textMuted }]}>Extra login security via SMS or authenticator app</Text>
           </View>
-          <Switch
-            value={twoFA}
-            disabled={clinicalLocked}
-            onValueChange={(value) => openClinicalConfirm({ two_factor_enabled: value })}
-            trackColor={{ false: C.border, true: `${C.success}80` }}
-            thumbColor={twoFA ? C.success : '#fff'}
-          />
+          <View style={{ backgroundColor: C.warningLight || '#FFF3CD', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 }}>
+            <Text style={{ color: C.warning || '#D97706', fontSize: 11, fontWeight: '700' }}>Coming soon</Text>
+          </View>
         </View>
         <View style={[styles.settingRow, { borderBottomWidth: 0 }]}>
           <View style={{ flex: 1 }}>

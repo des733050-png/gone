@@ -69,6 +69,8 @@ export const ENDPOINTS = Object.freeze({
   staffResetPassword:   (id) => `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/staff/${id}/reset-password/`,
   facilitySpecialties:  `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/specialties/`,
   facilitySpecialtyDetail: (id) => `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/specialties/${id}/`,
+  specializations:          `${API_CONFIG.BASE_URL}/api/v1/specializations/`,
+  specializationRequests:   `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/specialization-requests/`,
   patientInvites:       `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/patient-invites/`,
   // Booking flow helpers
   bookingSpecialties:   `${API_CONFIG.BASE_URL}${PROVIDER_BASE_PATH}/booking/specialties/`,

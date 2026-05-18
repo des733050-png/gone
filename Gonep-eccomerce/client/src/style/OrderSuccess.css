@@ -1,0 +1,14 @@
+.success-box {
+  max-width: 420px;
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+ box-shadow: rgba(0, 0, 0, 0.06) 0px 2px 4px 0px inset;
+}
+
+
+
+.order-id {
+  font-size: 14px;
+  margin-top: 10px;
+}

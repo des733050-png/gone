@@ -4,16 +4,19 @@
 //   - Page routing via goTo()
 //   - Unread notification badge
 //   - Sidebar open/close state
+//   - Verification gate: when facility is not VERIFIED or is SUSPENDED the
+//     sidebar is locked and VerificationDashboard is shown in the main area.
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { View, StyleSheet, TouchableWithoutFeedback } from 'react-native';
+import { View, StyleSheet, TouchableWithoutFeedback, Platform } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useResponsive } from '../theme/responsive';
 import { Sidebar } from '../organisms/Sidebar';
 import { TopBar } from '../organisms/TopBar';
 import { PageSeo } from '../seo/PageSeo';
 import { getAllowedPages, normalizeRole } from '../config/roles';
-import { getNotifications } from '../api';
+import { getNotifications, getCurrentUser } from '../api';
+import { VerificationDashboard } from './Auth/Onboarding/VerificationDashboard';
 
 import { DashboardScreen, AppointmentsScreen, AvailabilityScreen,
          EMRScreen, LabScreen, PharmacyScreen }     from './clinical';
@@ -257,6 +260,70 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
   const { sidebarDocked }     = useResponsive();
   const userRole = normalizeRole(user.role);
 
+  // ── Verification + suspension gate ────────────────────────────────────────
+  // verification_status: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED'
+  // facility_status:     'pending'    | 'approved' | 'suspended'
+  const verificationStatus = user?.verification_status || 'UNVERIFIED';
+  const facilityStatus     = user?.facility_status     || 'pending';
+  const isVerified  = verificationStatus === 'VERIFIED';
+  const isSuspended = facilityStatus === 'suspended';
+  // Sidebar and all module pages are locked until the facility is both
+  // VERIFIED and not SUSPENDED.
+  const isLocked = !isVerified || isSuspended;
+
+  // ── On-mount status check (login / reload) ───────────────────────────────
+  // When the shell first mounts with a LOCKED state (unverified or suspended),
+  // immediately re-fetch the full user profile so that any approval/suspension
+  // the admin applied while the user was offline is reflected right away —
+  // without waiting for the VerificationDashboard's 15-second poll.
+  //
+  // If the fresh profile says VERIFIED → onUpdateUser propagates the change,
+  // isLocked flips to false, and the full portal renders in the same tick.
+  useEffect(() => {
+    if (!isLocked || !onUpdateUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const fresh = await getCurrentUser();
+        if (!cancelled && fresh) {
+          onUpdateUser({ ...fresh, role: normalizeRole(fresh.role) });
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  // Run once on mount (empty deps after isLocked initial value — the effect
+  // re-runs if isLocked changes from false→true which covers suspension).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Periodic status re-check (suspension detection for verified accounts) ─
+  // While a verified user is on the dashboard, silently re-poll every 5 min
+  // and on window focus so admin-applied suspension is reflected without a
+  // manual refresh.  VerificationDashboard owns its own 15 s polling when
+  // the account is not yet verified.
+  useEffect(() => {
+    if (!isVerified || !onUpdateUser) return;
+
+    const checkStatus = async () => {
+      try {
+        const fresh = await getCurrentUser();
+        if (fresh) onUpdateUser({ ...fresh, role: normalizeRole(fresh.role) });
+      } catch (_) {}
+    };
+
+    const intervalId = setInterval(checkStatus, 5 * 60 * 1000);
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.addEventListener('focus', checkStatus);
+      return () => {
+        clearInterval(intervalId);
+        window.removeEventListener('focus', checkStatus);
+      };
+    }
+    return () => clearInterval(intervalId);
+  }, [isVerified, onUpdateUser]);
+  // ──────────────────────────────────────────────────────────────────────────
+
   const allowedPages = useMemo(() => getAllowedPages(userRole), [userRole]);
 
   // Build the filtered nav tree for this role
@@ -281,8 +348,36 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
   const navItems = useMemo(() => navTree.flatMap(g => g.items), [navTree]);
 
   const defaultPage = allowedPages[0] || 'home';
-  const [page,         setPage]         = useState(defaultPage);
-  const [pageFilter,   setPageFilter]   = useState(null);
+
+  // ── Persist current page across reloads (web only) ────────────────────────
+  const SESSION_PAGE_KEY   = 'gonep_provider_page';
+  const SESSION_FILTER_KEY = 'gonep_provider_filter';
+
+  const [page, setPage] = useState(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const saved = window.sessionStorage?.getItem(SESSION_PAGE_KEY);
+      if (saved && allowedPages.includes(saved)) return saved;
+    }
+    return defaultPage;
+  });
+
+  const [pageFilter, setPageFilter] = useState(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      return window.sessionStorage?.getItem(SESSION_FILTER_KEY) || null;
+    }
+    return null;
+  });
+
+  // Keep sessionStorage in sync whenever page/filter changes
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    window.sessionStorage?.setItem(SESSION_PAGE_KEY, page);
+    if (pageFilter) {
+      window.sessionStorage?.setItem(SESSION_FILTER_KEY, pageFilter);
+    } else {
+      window.sessionStorage?.removeItem(SESSION_FILTER_KEY);
+    }
+  }, [page, pageFilter]);
   const [sidebarOpen,  setSidebarOpen]  = useState(sidebarDocked);
   const [notifUnread,  setNotifUnread]  = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -398,6 +493,8 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
         onClose={() => setSidebarOpen(false)}
         overlay={!sidebarDocked}
         notificationsUnread={notifUnread}
+        locked={isLocked}
+        facilityStatus={facilityStatus}
       />
 
       <View style={styles.main}>
@@ -408,30 +505,46 @@ export function MainShell({ user, onLogout, onUpdateUser }) {
         )}
         <View style={styles.topBarLayer}>
           <TopBar
-            meta={meta}
+            meta={isLocked ? { title: 'Account Setup', sub: 'Complete verification to access the portal', icon: { lib: 'feather', name: 'shield' } } : meta}
             user={user}
             onToggleSidebar={() => setSidebarOpen(o => !o)}
-            onShowNotifications={() => { goTo('notifications'); setNotifUnread(0); }}
+            onShowNotifications={() => { if (!isLocked) { goTo('notifications'); setNotifUnread(0); } }}
             sidebarOpen={sidebarOpen}
             sidebarDocked={sidebarDocked}
-            notificationsUnread={notifUnread}
+            notificationsUnread={isLocked ? 0 : notifUnread}
             onUserMenuSelect={handleUserMenuSelect}
             userMenuOpen={userMenuOpen}
             setUserMenuOpen={setUserMenuOpen}
           />
         </View>
-        <View style={styles.page}>{renderPage()}</View>
+        <View style={styles.page}>
+          {isLocked
+            ? (
+              <VerificationDashboard
+                user={user}
+                facilityStatus={facilityStatus}
+                onUnlock={(freshUser) => {
+                  if (onUpdateUser) onUpdateUser(freshUser);
+                }}
+                onLogout={onLogout}
+              />
+            )
+            : renderPage()
+          }
+        </View>
       </View>
 
       {/* ── First-login onboarding overlay ────────────────────────────────────
            GettingStartedOverlay renders null for every role except
            facility_admin with onboarding_completed === false.
-           Sits outside the main/sidebar split so it truly overlays everything. */}
-      <GettingStartedOverlay
-        user={onboardingUser}
-        onDone={handleOnboardingDismiss}
-        onSkip={handleOnboardingDismiss}
-      />
+           Only shown when the account is verified and unlocked. */}
+      {!isLocked && (
+        <GettingStartedOverlay
+          user={onboardingUser}
+          onDone={handleOnboardingDismiss}
+          onSkip={handleOnboardingDismiss}
+        />
+      )}
     </View>
   );
 }

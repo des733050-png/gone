@@ -1,0 +1,9 @@
+.navbar {
+  background-color: var(--nav-bg) !important;
+  box-shadow: 0 2px 12px var(--shadow);
+  border-bottom: 1px solid var(--border);
+  transition: background-color 0.3s;
+}
+.navbar .nav-link { color: var(--text-sec) !important; font-size: 0.95rem; font-weight: 500; }
+.navbar .nav-link:hover, .navbar .nav-link.active { color: var(--primary) !important; }
+.navbar-brand { color: var(--text) !important; font-weight: 700; font-size: 1.1rem; }

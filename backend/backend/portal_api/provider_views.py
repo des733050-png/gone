@@ -36,6 +36,9 @@ from core.models import (
     ProviderVerificationDocumentType,
     ProviderVerificationStatus,
     ProviderVerificationSubmission,
+    Specialization,
+    SpecializationRequest,
+    SpecializationRequestStatus,
     WorkflowStatus,
 )
 from portal_api.utils import (
@@ -318,33 +321,170 @@ def resolve_staff_doctor_specialty(facility, data, *, allow_empty=False):
     return fs, (fs.name if fs else legacy[:120])
 
 
+class SpecializationListView(APIView):
+    """
+    GET /api/v1/specializations/
+    Public — returns the platform-wide active specialization catalogue.
+    Used by both the provider portal (assign dropdown) and patient portal
+    (doctor search filter).
+    """
+    permission_classes = []  # public
+
+    def get(self, request):
+        qs = Specialization.objects.filter(is_active=True).order_by("name")
+        return Response([
+            {
+                "id":          format_uuid(s.id),
+                "name":        s.name,
+                "slug":        s.slug,
+                "description": s.description,
+            }
+            for s in qs
+        ])
+
+
+class SpecializationRequestView(APIView):
+    """
+    GET  /api/v1/provider/specialization-requests/  — list this facility's requests
+    POST /api/v1/provider/specialization-requests/  — submit a new request
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+        qs = SpecializationRequest.objects.filter(
+            facility=membership.facility
+        ).select_related("specialization")
+        return Response([
+            {
+                "id":             format_uuid(r.id),
+                "name":           r.name,
+                "reason":         r.reason,
+                "status":         r.status,
+                "review_note":    r.review_note,
+                "specialization": (
+                    {
+                        "id":   format_uuid(r.specialization.id),
+                        "name": r.specialization.name,
+                    }
+                    if r.specialization else None
+                ),
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in qs
+        ])
+
+    def post(self, request):
+        membership = ensure_provider_membership(request.user)
+        ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
+
+        name   = str((request.data or {}).get("name")   or "").strip()
+        reason = str((request.data or {}).get("reason") or "").strip()
+
+        if len(name) < 2:
+            raise ValidationError({"name": "Specialization name must be at least 2 characters."})
+
+        # Reject if the name already exists in the master catalogue (case-insensitive).
+        if Specialization.objects.filter(name__iexact=name, is_active=True).exists():
+            raise ValidationError({
+                "name": (
+                    "This specialization already exists in the catalogue. "
+                    "Assign it directly from the specialization list."
+                )
+            })
+
+        # Prevent duplicate pending requests from the same facility.
+        existing = SpecializationRequest.objects.filter(
+            facility=membership.facility,
+            name__iexact=name,
+            status=SpecializationRequestStatus.PENDING,
+        ).first()
+        if existing:
+            raise ValidationError({
+                "name": "A pending request for this name already exists. Please wait for review."
+            })
+
+        req = SpecializationRequest.objects.create(
+            facility=membership.facility,
+            requested_by=request.user,
+            name=name,
+            reason=reason,
+            status=SpecializationRequestStatus.PENDING,
+        )
+        return Response(
+            {
+                "id":         format_uuid(req.id),
+                "name":       req.name,
+                "reason":     req.reason,
+                "status":     req.status,
+                "review_note": "",
+                "created_at": req.created_at.isoformat(),
+            },
+            status=201,
+        )
+
+
 class ProviderFacilitySpecialtiesView(APIView):
-    """GET/POST /api/v1/provider/specialties/ — facility specialty catalog (admin)."""
+    """
+    GET  /api/v1/provider/specialties/ — list this facility's assigned specializations
+    POST /api/v1/provider/specialties/ — assign a specialization from the master list
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         membership = ensure_provider_membership(request.user)
         ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
-        rows = FacilitySpecialty.objects.filter(facility=membership.facility).order_by(
-            "name"
+        rows = (
+            FacilitySpecialty.objects
+            .filter(facility=membership.facility)
+            .select_related("specialization")
+            .order_by("name")
         )
-        return Response(
-            [{"id": format_uuid(s.id), "name": s.name} for s in rows]
-        )
+        return Response([
+            {
+                "id":   format_uuid(s.id),
+                "name": s.name,
+                "specialization_id": (
+                    format_uuid(s.specialization.id) if s.specialization else None
+                ),
+            }
+            for s in rows
+        ])
 
     def post(self, request):
         membership = ensure_provider_membership(request.user)
         ensure_roles(membership, {ProviderSubRole.FACILITY_ADMIN})
-        name = str((request.data or {}).get("name") or "").strip()
-        if len(name) < 2:
-            raise ValidationError({"name": "Enter a specialty name (at least 2 characters)."})
-        fs = FacilitySpecialty.resolve_for_facility(membership.facility, name)
-        return Response({"id": format_uuid(fs.id), "name": fs.name}, status=201)
+
+        specialization_id = str((request.data or {}).get("specialization_id") or "").strip()
+
+        if not specialization_id:
+            raise ValidationError({
+                "specialization_id": "A specialization_id from the master catalogue is required."
+            })
+
+        # Look up the specialization from the master list.
+        try:
+            spec = Specialization.objects.get(pk=specialization_id, is_active=True)
+        except (Specialization.DoesNotExist, Exception):
+            raise ValidationError({
+                "specialization_id": "Specialization not found or is inactive."
+            })
+
+        fs = FacilitySpecialty.assign_from_specialization(membership.facility, spec)
+        return Response(
+            {
+                "id":   format_uuid(fs.id),
+                "name": fs.name,
+                "specialization_id": format_uuid(spec.id),
+            },
+            status=201,
+        )
 
 
 class ProviderFacilitySpecialtyDetailView(APIView):
-    """DELETE /api/v1/provider/specialties/<id>/ — remove catalog entry if unused."""
+    """DELETE /api/v1/provider/specialties/<id>/ — remove a specialty assignment if unused."""
 
     permission_classes = [IsAuthenticated]
 
@@ -360,9 +500,7 @@ class ProviderFacilitySpecialtyDetailView(APIView):
             facility=membership.facility, facility_specialty=fs
         ).exists():
             raise ValidationError(
-                {
-                    "detail": "Reassign doctors to another specialty before deleting this one."
-                }
+                {"detail": "Reassign doctors to another specialty before removing this one."}
             )
         fs.delete()
         return Response(status=204)
@@ -982,6 +1120,23 @@ class ProviderVerificationSubmitView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
 
+    def get(self, request):
+        """
+        Defensive GET handler — returns the current verification status so that
+        any client which accidentally GETs this URL receives useful data instead
+        of an opaque 405.  The canonical read endpoint is GET /verification/,
+        but this alias prevents error banners when the browser or a retry path
+        sends a GET here.
+        """
+        membership = ensure_provider_membership(request.user, enforce_verification=False)
+        return Response(
+            {
+                "success": True,
+                "data": build_provider_verification_payload(membership.facility),
+                "message": "Provider verification status retrieved.",
+            }
+        )
+
     @transaction.atomic
     def post(self, request):
         membership = ensure_provider_membership(request.user, enforce_verification=False)
@@ -1037,11 +1192,64 @@ class ProviderVerificationSubmitView(APIView):
                 status=400,
             )
 
-        submission = ProviderVerificationSubmission.objects.create(
-            facility=membership.facility,
-            submitted_by=request.user,
-            status=ProviderVerificationStatus.PENDING,
+        # ── Find or create the active submission ─────────────────────────────
+        # CRITICAL: we must never create a new submission per-file upload.
+        # Each file in a batch belongs to the SAME submission so that:
+        #   1. Sequential multi-file uploads work without hitting the lock.
+        #   2. The admin sees the full document set for one submission.
+        #   3. Rollback (delete) targets the right submission.
+        #
+        # Strategy:
+        #   UNVERIFIED (no prior submission) → create new PENDING submission.
+        #   PENDING (batch in progress / partial reload) → reuse, replace same doc type.
+        #   REJECTED → create a new PENDING submission for the re-submission.
+        #   VERIFIED  → blocked above by can_upload_verification_documents check.
+
+        existing_submission = (
+            ProviderVerificationSubmission.objects
+            .filter(facility=membership.facility)
+            .exclude(status=ProviderVerificationStatus.VERIFIED)
+            .order_by("-created_at")
+            .first()
         )
+
+        if existing_submission is None:
+            # First upload ever for this facility.
+            submission = ProviderVerificationSubmission.objects.create(
+                facility=membership.facility,
+                submitted_by=request.user,
+                status=ProviderVerificationStatus.PENDING,
+            )
+        elif existing_submission.status == ProviderVerificationStatus.REJECTED:
+            # Provider re-submitting after rejection → new submission record.
+            submission = ProviderVerificationSubmission.objects.create(
+                facility=membership.facility,
+                submitted_by=request.user,
+                status=ProviderVerificationStatus.PENDING,
+            )
+        else:
+            # PENDING (batch already started or resumed after reload) → reuse.
+            submission = existing_submission
+            # Update submitter if a different admin finishes the batch.
+            if submission.submitted_by_id != request.user.pk:
+                submission.submitted_by = request.user
+                submission.save(update_fields=["submitted_by", "updated_at"])
+
+        # ── Add / replace the document for this type ──────────────────────
+        # If the provider re-selects the same doc type (Replace button), delete
+        # the old record + stored file first so we don't accumulate duplicates.
+        old_doc = (
+            ProviderVerificationDocument.objects
+            .filter(submission=submission, document_type=document_type)
+            .first()
+        )
+        if old_doc:
+            try:
+                old_doc.file.delete(save=False)
+            except Exception:
+                pass
+            old_doc.delete()
+
         ProviderVerificationDocument.objects.create(
             submission=submission,
             document_type=document_type,
@@ -1057,7 +1265,7 @@ class ProviderVerificationSubmitView(APIView):
             {
                 "success": True,
                 "data": build_provider_verification_payload(membership.facility),
-                "message": "Verification documents submitted for review.",
+                "message": "Verification document uploaded.",
             },
             status=201,
         )
@@ -2170,6 +2378,23 @@ class ProviderStaffView(APIView):
                 "Copy this temporary password now — it will not be shown again. "
                 "Ask the staff member to sign in and change it from their profile."
             )
+            # Send welcome email with one-time password
+            from core.email_utils import send_staff_welcome_email
+            from core.models import ProviderSubRole as _PSR
+            _role_labels = {
+                _PSR.FACILITY_ADMIN: "Facility Admin",
+                _PSR.DOCTOR:         "Doctor",
+                _PSR.RECEPTIONIST:   "Receptionist",
+                _PSR.LAB_MANAGER:    "Lab Manager",
+                _PSR.BILLING_MANAGER:"Billing Manager",
+                _PSR.POS:            "POS Operator",
+            }
+            send_staff_welcome_email(
+                user=user,
+                facility_name=membership.facility.name,
+                role_label=_role_labels.get(role, role),
+                temp_password=generated_password,
+            )
         return Response(payload, status=201)
 
 
@@ -2200,6 +2425,13 @@ class ProviderStaffResetPasswordView(APIView):
         payload["password_note"] = (
             "Copy this password now — it will not be shown again. The staff "
             "member should sign in and change it from their profile."
+        )
+        # Email the new password to the staff member
+        from core.email_utils import send_staff_password_reset_email
+        send_staff_password_reset_email(
+            user=staff_membership.user,
+            facility_name=membership.facility.name,
+            new_password=new_password,
         )
         return Response(payload, status=200)
 
@@ -2516,6 +2748,8 @@ class ProviderSupportTicketsView(APIView):
             status=str(data.get("status") or "open").strip(),
             responses=data.get("responses") or [],
         )
+        from core.email_utils import send_support_ticket_created_email
+        send_support_ticket_created_email(ticket)
         return Response(build_support_ticket_payload(ticket), status=201)
 
 
@@ -2531,11 +2765,20 @@ class ProviderSupportTicketDetailView(APIView):
             raise PermissionDenied("You can only view your own support tickets.")
         if ("responses" in data or "status" in data) and not is_admin:
             raise PermissionDenied("Only facility admins can respond to tickets.")
+        prev_response_count = len(ticket.responses or [])
         if "responses" in data:
             ticket.responses = data.get("responses") or []
         if "status" in data:
             ticket.status = str(data.get("status") or ticket.status).strip()
         ticket.save()
+        # Email the raiser when a new response is added
+        new_responses = ticket.responses or []
+        if is_admin and len(new_responses) > prev_response_count:
+            latest = new_responses[-1]
+            response_text = latest.get("text") or latest.get("message") or str(latest)
+            responder = request.user.get_full_name().strip() or request.user.email
+            from core.email_utils import send_support_ticket_response_email
+            send_support_ticket_response_email(ticket, response_text, responder)
         return Response(build_support_ticket_payload(ticket))
 
 

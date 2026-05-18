@@ -11,8 +11,6 @@ import { normalizeRole } from './src/config/roles';
 import { AuthScreen }                from './src/screens/Auth/Authentication';
 import { MainShell }                 from './src/screens/MainShell';
 import { HospitalOnboardingScreen }  from './src/screens/Auth/Onboarding';
-import { VerificationGateScreen }    from './src/screens/Auth/Onboarding/VerificationGateScreen';
-import { GettingStartedOverlay }     from './src/screens/Auth/Onboarding/GettingStartedOverlay';
 import MuiXProvider from './src/mui/MuiXProvider';
 
 const Stack = createNativeStackNavigator();
@@ -111,35 +109,21 @@ function RootNavigator() {
   );
 }
 
-// PostLoginShell gates the main portal behind:
-//   1. facility verification (VerificationGateScreen)
-//   2. one-time getting-started overlay (after VERIFIED, only first time)
+// PostLoginShell: always renders MainShell, which now owns the verification
+// gate internally.  Verification state (UNVERIFIED / PENDING / VERIFIED /
+// SUSPENDED) is detected inside MainShell and switches between a locked
+// sidebar + VerificationDashboard view vs. the full portal.
 function PostLoginShell({ user, setUser, ...rest }) {
-  // Re-read the user object's verification fields. The session payload
-  // includes `verification_status` + `access` from build_provider_payload.
-  const verificationStatus = user?.verification_status || 'UNVERIFIED';
-  const isVerified = verificationStatus === 'VERIFIED';
-
   const handleLogout = async () => {
-    try { await logoutProvider(); } finally { setUser(null); }
+    try { await logoutProvider(); } finally {
+      // Clear persisted page so next user starts at dashboard
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.sessionStorage?.removeItem('gonep_provider_page');
+        window.sessionStorage?.removeItem('gonep_provider_filter');
+      }
+      setUser(null);
+    }
   };
-
-  if (!isVerified) {
-    return (
-      <VerificationGateScreen
-        user={user}
-        onUnlock={async () => {
-          // After verification approval, refresh user payload to pick up
-          // the new verification_status + access flags.
-          try {
-            const fresh = await getCurrentUser();
-            if (fresh) setUser({ ...fresh, role: normalizeRole(fresh.role) });
-          } catch (_) {}
-        }}
-        onLogout={() => setUser(null)}
-      />
-    );
-  }
 
   return (
     <View style={{ flex: 1 }}>
@@ -150,11 +134,6 @@ function PostLoginShell({ user, setUser, ...rest }) {
         onUpdateUser={(nextUser) => {
           setUser(nextUser ? { ...nextUser, role: normalizeRole(nextUser.role) } : null);
         }}
-      />
-      <GettingStartedOverlay
-        user={user}
-        onDone={() => setUser((u) => u ? { ...u, onboarding_completed: true } : u)}
-        onSkip={() => setUser((u) => u ? { ...u, onboarding_completed: true } : u)}
       />
     </View>
   );

@@ -65,6 +65,41 @@ export const getFacilitySpecialties   = fetchFacilitySpecialties;
 export { createFacilitySpecialty, deleteFacilitySpecialty };
 export const updateFacilitySpecialty = async (id, payload) => ({ id, ...payload });
 
+// Specialization catalogue + requests (mock data)
+const MOCK_SPECIALIZATIONS = [
+  { id: 'spec-1',  name: 'Cardiology',               slug: 'cardiology',               description: '' },
+  { id: 'spec-2',  name: 'Dermatology',               slug: 'dermatology',               description: '' },
+  { id: 'spec-3',  name: 'Emergency Medicine',        slug: 'emergency-medicine',        description: '' },
+  { id: 'spec-4',  name: 'Family Medicine',           slug: 'family-medicine',           description: '' },
+  { id: 'spec-5',  name: 'General Medicine',          slug: 'general-medicine',          description: '' },
+  { id: 'spec-6',  name: 'General Surgery',           slug: 'general-surgery',           description: '' },
+  { id: 'spec-7',  name: 'Gynaecology & Obstetrics',  slug: 'gynaecology-obstetrics',    description: '' },
+  { id: 'spec-8',  name: 'Internal Medicine',         slug: 'internal-medicine',         description: '' },
+  { id: 'spec-9',  name: 'Neurology',                 slug: 'neurology',                 description: '' },
+  { id: 'spec-10', name: 'Oncology',                  slug: 'oncology',                  description: '' },
+  { id: 'spec-11', name: 'Ophthalmology',             slug: 'ophthalmology',             description: '' },
+  { id: 'spec-12', name: 'Orthopaedics',              slug: 'orthopaedics',              description: '' },
+  { id: 'spec-13', name: 'Paediatrics',               slug: 'paediatrics',               description: '' },
+  { id: 'spec-14', name: 'Psychiatry',                slug: 'psychiatry',                description: '' },
+  { id: 'spec-15', name: 'Radiology',                 slug: 'radiology',                 description: '' },
+];
+const _mockSpecRequests = [];
+export const getSpecializations = async () => MOCK_SPECIALIZATIONS;
+export const getSpecializationRequests = async () => _mockSpecRequests;
+export const createSpecializationRequest = async (payload) => {
+  const req = {
+    id: `req-${Date.now()}`,
+    name: payload?.name || '',
+    reason: payload?.reason || '',
+    status: 'pending',
+    review_note: '',
+    specialization: null,
+    created_at: new Date().toISOString(),
+  };
+  _mockSpecRequests.unshift(req);
+  return req;
+};
+
 // Booking flow helpers (mock)
 export const getBookingSpecialties = fetchFacilitySpecialties;
 export const getBookingDoctors = async (specialty) => {

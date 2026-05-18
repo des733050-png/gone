@@ -154,6 +154,9 @@ export function Sidebar({
   onClose,
   overlay = false,
   notificationsUnread = 0,
+  // Verification / suspension gate
+  locked = false,          // when true: nav items are visually disabled
+  facilityStatus = 'pending', // 'pending' | 'approved' | 'suspended'
 }) {
   const { C } = useTheme();
   const insets = useSafeAreaInsets();
@@ -226,11 +229,43 @@ export function Sidebar({
         </Text>
       </View>
 
+      {/* ── Lock status chip (shown when account is locked) ── */}
+      {locked && (
+        <View style={[
+          styles.lockChip,
+          {
+            backgroundColor: facilityStatus === 'suspended'
+              ? `${C.danger}12`
+              : `${C.warning}12`,
+            borderColor: facilityStatus === 'suspended'
+              ? `${C.danger}30`
+              : `${C.warning}30`,
+          },
+        ]}>
+          <Icon
+            name={facilityStatus === 'suspended' ? 'alert-octagon' : 'lock'}
+            lib="feather"
+            size={12}
+            color={facilityStatus === 'suspended' ? C.danger : C.warning}
+            style={{ marginRight: 6 }}
+          />
+          <Text style={[
+            styles.lockChipText,
+            { color: facilityStatus === 'suspended' ? C.danger : C.warning },
+          ]}>
+            {facilityStatus === 'suspended' ? 'Account suspended' : 'Verification pending'}
+          </Text>
+        </View>
+      )}
+
       {/* ── Nav tree ── */}
+      {/* When locked the tree is visible but non-interactive (opacity + pointerEvents) */}
       <ScrollView
-        style={{ flex: 1 }}
+        style={[{ flex: 1 }, locked && styles.navLocked]}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 8 }}
+        scrollEnabled={!locked}
+        pointerEvents={locked ? 'none' : 'auto'}
       >
         {tree.map((group, gi) => (
           <View key={gi}>
@@ -240,13 +275,13 @@ export function Sidebar({
                 key={item.id}
                 item={item}
                 activeId={activeId}
-                onPress={onChange}
+                onPress={locked ? () => {} : onChange}
                 onClose={onClose}
                 overlay={overlay}
                 C={C}
                 notifCount={notificationsUnread}
                 openGroups={openGroups}
-                onToggleGroup={toggleGroup}
+                onToggleGroup={locked ? () => {} : toggleGroup}
               />
             ))}
           </View>
@@ -362,4 +397,18 @@ const styles = StyleSheet.create({
   sidebarUserRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   footerName:     { fontSize: 12, fontWeight: '700' },
   footerEmail:    { fontSize: 10 },
+  // Lock state
+  lockChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 10,
+    marginTop: 6,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  lockChipText: { fontSize: 11, fontWeight: '700', flex: 1 },
+  navLocked:    { opacity: 0.38 },
 });

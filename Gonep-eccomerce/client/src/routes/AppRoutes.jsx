@@ -1,0 +1,113 @@
+import { createBrowserRouter, Navigate } from 'react-router-dom';
+
+import RegisterForm from '@/pages/auth/Register';
+import LoginForm from '@/pages/auth/Login';
+import ForgotPassword from '@/pages/auth/ForgotPassword';
+
+import UserLayout from '@/layouts/UserLayout';
+import Home from '@/pages/user/Home'
+import ProductDetails from '@/pages/user/ProductDetails';
+import Cart from '@/pages/user/Cart';
+import Checkout from '@/pages/user/Checkout';
+import OrderSuccess from '@/pages/user/OrderSuccess';
+import MyOrders from '@/pages/user/MyOrders';
+import MyProfile from '@/pages/user/MyProfile';
+
+import SellerLayout from '@/layouts/SellerLayout';
+import SellerDashboard from '@/pages/seller/SellerDashboard';
+import SellerProducts from '@/pages/seller/SellerProducts';
+import SellerOrders from '@/pages/seller/SellerOrders';
+import SellerProfile from '@/pages/seller/SellerProfile';
+import SellerEarnings from '@/pages/seller/SellerEanings';
+import AddProduct from '@/pages/seller/AddProduct';
+import UpdateProduct from '@/pages/seller/UpdateProduct';
+import UpdateProfile from '@/pages/seller/UpdateProfile';
+import SellerRequestCategory from '@/pages/seller/SellerRequestCategory';
+import SellerRequestBrand from '@/pages/seller/SellerRequestBrand';
+
+import AdminLayout from '@/layouts/AdminLayout';
+import AdminDashboard from '@/pages/admin/AdminDashboard'
+import Categories from '@/pages/admin/Categories';
+import AddCategory from '@/pages/admin/AddCategory';
+import UpdateCategory from '@/pages/admin/UpdateCategory';
+import Brands from '@/pages/admin/Brands';
+import AddBrand from '@/pages/admin/AddBrand';
+import UpdateBrand from '@/pages/admin/UpdateBrand';
+import Users from '@/pages/admin/Users';
+import Sellers from '@/pages/admin/Sellers';
+import AdminOrders from '@/pages/admin/AdminOrders';
+import Settings from '@/pages/admin/Settings';
+import PendingApprovals from '@/pages/admin/PendingApprovals';
+
+import NotFound from '@/components/NotFound';
+import ProtectedRoute from '@/guards/ProtectedRoute';
+import SellerRoute from '../guards/SellerRoute';
+import AdminRoute from '../guards/AdminRoute';
+
+const router = createBrowserRouter([
+  {
+    path: '/', element: <UserLayout />,
+    children: [
+      { index: true, element: <Home /> },
+      { path: 'product-details/:id', element: <ProductDetails /> },
+      { path: 'cart', element: <Cart /> },
+      {
+        element: <ProtectedRoute />,
+        children: [
+          { path: 'checkout', element: <Checkout /> },
+          { path: 'order-success', element: <OrderSuccess /> },
+          { path: 'myorders', element: <MyOrders /> },
+          { path: 'myprofile', element: <MyProfile /> }
+        ]
+      }
+    ]
+  },
+  {
+    path: '/seller',
+    element: <SellerRoute />,
+    children: [{
+      element: <SellerLayout />,
+      children: [
+        { index: true, element: <Navigate to="dashboard" replace /> },
+        { path: 'dashboard',   element: <SellerDashboard /> },
+        { path: 'products',    element: <SellerProducts /> },
+        { path: 'orders',      element: <SellerOrders /> },
+        { path: 'profile',     element: <SellerProfile /> },
+        { path: 'earnings',    element: <SellerEarnings /> },
+        { path: 'add-product', element: <AddProduct /> },
+        { path: 'update-product/:id', element: <UpdateProduct /> },
+        { path: 'update-profile/:id', element: <UpdateProfile /> },
+        { path: 'categories',  element: <SellerRequestCategory /> },
+        { path: 'brands',      element: <SellerRequestBrand /> },
+      ]
+    }]
+  },
+  {
+    path: '/admin',
+    element: <AdminRoute />,
+    children: [{
+      element: <AdminLayout />,
+      children: [
+        { index: true, element: <Navigate to="dashboard" replace /> },
+        { path: 'dashboard',          element: <AdminDashboard /> },
+        { path: 'categories',         element: <Categories /> },
+        { path: 'add-category',       element: <AddCategory /> },
+        { path: 'update-category/:id',element: <UpdateCategory /> },
+        { path: 'brands',             element: <Brands /> },
+        { path: 'add-brand',          element: <AddBrand /> },
+        { path: 'update-brand/:id',   element: <UpdateBrand /> },
+        { path: 'users',              element: <Users /> },
+        { path: 'sellers',            element: <Sellers /> },
+        { path: 'orders',             element: <AdminOrders /> },
+        { path: 'settings',           element: <Settings /> },
+        { path: 'pending-approvals',  element: <PendingApprovals /> },
+      ]
+    }]
+  },
+  { path: '*', element: <NotFound /> },
+  { path: '/register', element: <RegisterForm /> },
+  { path: '/login',    element: <LoginForm /> },
+  { path: '/forgot-password', element: <ForgotPassword /> }
+]);
+
+export default router;

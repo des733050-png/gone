@@ -1,0 +1,43 @@
+const express = require('express');
+const router = express.Router();
+
+const adminAuth = require('../middleware/adminAuth');
+
+const adminController = require('../controllers/admin.controller')
+
+
+router.post('/categories', adminAuth, adminController.addCategory);
+router.get('/categories', adminAuth, adminController.getCategories);
+router.get('/categories/pending', adminAuth, adminController.getPendingCategories);
+router.get('/categories/:id', adminAuth, adminController.getCategoryById);
+router.patch('/categories/:id', adminAuth, adminController.updateCategory);
+router.patch('/categories/:id/approve', adminAuth, adminController.approveCategory);
+router.delete('/categories/:id', adminAuth, adminController.deleteCategory);
+
+router.post('/brands', adminAuth, adminController.addBrand);
+router.get('/brands', adminAuth, adminController.getBrands);
+router.get('/brands/pending', adminAuth, adminController.getPendingBrands);
+router.get('/brands/:id', adminAuth, adminController.getBrandById);
+router.patch('/brands/:id', adminAuth, adminController.updateBrand);
+router.patch('/brands/:id/approve', adminAuth, adminController.approveBrand);
+router.delete('/brands/:id', adminAuth, adminController.deleteBrand);
+
+
+router.get('/users', adminAuth, adminController.getUsers);
+router.delete('/users/:id', adminAuth, adminController.deleteUser);
+router.patch('/users/:id/toggle-block', adminAuth, adminController.toggleBlockUser);
+
+
+router.get('/sellers', adminAuth, adminController.getSellers);
+router.delete('/sellers/:id', adminAuth, adminController.deleteSeller);
+router.patch('/sellers/:id/toggle-block', adminAuth, adminController.toggleBlockSeller);
+
+
+router.get('/orders', adminAuth, adminController.getAllOrders);
+router.patch('/orders/:orderId/status', adminAuth, adminController.updateOrderStatus);
+router.get('/dashboard', adminAuth, adminController.getAdminDashboard);
+
+router.get('/settings', adminAuth, adminController.getPendingSellers);
+router.patch('/approve-seller/:id', adminAuth, adminController.approveSellers);
+
+module.exports = router;

@@ -665,15 +665,101 @@ class Facility(BaseTrackedModel):
         return self.name
 
 
+class Specialization(BaseTrackedModel):
+    """
+    Platform-wide canonical specialization catalogue.
+
+    Created and managed exclusively by superadmin.
+    Facility admins select from this list — no free-text names permitted.
+    If a needed specialization is missing they submit a SpecializationRequest.
+    """
+
+    name        = models.CharField(max_length=120, unique=True)
+    slug        = models.SlugField(max_length=140, unique=True, blank=True)
+    description = models.TextField(blank=True)
+    is_active   = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        # Normalize to title-case on first save so "general medicine" and
+        # "GENERAL MEDICINE" are always stored as "General Medicine".
+        if not self.pk:
+            self.name = " ".join(self.name.split()).title() if self.name else self.name
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
+class SpecializationRequestStatus(models.TextChoices):
+    PENDING  = "pending",  "Pending"
+    APPROVED = "approved", "Approved"
+    REJECTED = "rejected", "Rejected"
+
+
+class SpecializationRequest(BaseTrackedModel):
+    """
+    A facility admin requests a new specialization not yet in the master list.
+    Superadmin reviews → approves (creates/links a Specialization) or rejects.
+    """
+
+    facility      = models.ForeignKey(
+        "Facility", on_delete=models.CASCADE,
+        related_name="specialization_requests",
+    )
+    requested_by  = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, related_name="+",
+    )
+    name          = models.CharField(max_length=120)
+    reason        = models.TextField(blank=True)
+    status        = models.CharField(
+        max_length=20,
+        choices=SpecializationRequestStatus.choices,
+        default=SpecializationRequestStatus.PENDING,
+        db_index=True,
+    )
+    reviewed_by   = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="+",
+    )
+    review_note   = models.TextField(blank=True)
+    # Filled once a superadmin approves and creates / links a Specialization.
+    specialization = models.ForeignKey(
+        Specialization, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="requests",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.status}) — {self.facility.name}"
+
+
 class FacilitySpecialty(BaseTrackedModel):
-    """Facility-scoped clinical specialty catalog for patient booking and staff assignment."""
+    """
+    Facility-scoped specialty assignment — links a Facility to a
+    platform Specialization for patient booking and staff assignment.
+    """
 
     facility = models.ForeignKey(
-        Facility,
+        "Facility",
         on_delete=models.CASCADE,
         related_name="specialties",
     )
+    # Canonical name kept in sync with the linked Specialization.
+    # Also populated for legacy rows that pre-date the master list.
     name = models.CharField(max_length=120)
+    # Link to the master Specialization record (null for legacy rows only).
+    specialization = models.ForeignKey(
+        Specialization, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="facility_specialties",
+    )
 
     class Meta:
         ordering = ["facility__name", "name"]
@@ -684,7 +770,11 @@ class FacilitySpecialty(BaseTrackedModel):
 
     @classmethod
     def resolve_for_facility(cls, facility, name):
-        """Return an existing row (case-insensitive match) or create one; None if name is empty."""
+        """
+        Return an existing row (case-insensitive match) or create one.
+        Used for legacy / import flows; new assignments should pass a
+        Specialization FK directly via assign_from_specialization().
+        """
         name_norm = " ".join((name or "").split())
         if not name_norm:
             return None
@@ -692,6 +782,23 @@ class FacilitySpecialty(BaseTrackedModel):
         if existing:
             return existing
         return cls.objects.create(facility=facility, name=name_norm[:120])
+
+    @classmethod
+    def assign_from_specialization(cls, facility, specialization):
+        """
+        Assign a Specialization from the master list to a facility.
+        Idempotent — returns the existing row if already assigned.
+        """
+        obj, _ = cls.objects.get_or_create(
+            facility=facility,
+            name=specialization.name,
+            defaults={"specialization": specialization},
+        )
+        # Keep FK in sync in case the row existed before the FK column was added.
+        if obj.specialization_id != specialization.pk:
+            obj.specialization = specialization
+            obj.save(update_fields=["specialization", "updated_at"])
+        return obj
 
 
 class PatientProfile(BaseTrackedModel):

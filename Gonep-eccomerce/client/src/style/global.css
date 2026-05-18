@@ -1,0 +1,275 @@
+/* ── Gonep Design System ───────────────────────────────────────────────────── */
+
+:root,
+[data-theme="light"] {
+  --primary:        #1A6FE8;
+  --primary-dark:   #1254C0;
+  --primary-light:  #EBF3FF;
+  --primary-mid:    #D0E4FF;
+  --secondary:      #0EA5E9;
+  --accent:         #06B6D4;
+  --success:        #10B981;
+  --success-light:  #D1FAE5;
+  --warning:        #F59E0B;
+  --warning-light:  #FEF3C7;
+  --danger:         #EF4444;
+  --danger-light:   #FEE2E2;
+  --purple:         #8B5CF6;
+  --purple-light:   #EDE9FE;
+  --bg:             #F0F5FF;
+  --surface:        #FFFFFF;
+  --card:           #FFFFFF;
+  --card-hover:     #F8FAFF;
+  --border:         #E1E9F5;
+  --divider:        #EEF2FA;
+  --text:           #0D1B35;
+  --text-sec:       #4A5878;
+  --text-muted:     #8FA0BB;
+  --text-inv:       #FFFFFF;
+  --shadow:         rgba(26,111,232,0.10);
+  --shadow-md:      rgba(26,111,232,0.15);
+  --nav-bg:         #FFFFFF;
+  --input-bg:       #F8FAFF;
+  --sidebar-bg:     #0D1B35;
+  --sidebar-text:   #FFFFFF;
+  --admin-nav:      #1254C0;
+  --seller-nav:     #0EA5E9;
+  --content-bg:     #F0F5FF;
+}
+
+[data-theme="dark"] {
+  --primary:        #4B9EFF;
+  --primary-dark:   #2563EB;
+  --primary-light:  #162D55;
+  --primary-mid:    #1A3560;
+  --secondary:      #38BDF8;
+  --accent:         #22D3EE;
+  --success:        #34D399;
+  --success-light:  #064E3B;
+  --warning:        #FBBF24;
+  --warning-light:  #451A03;
+  --danger:         #F87171;
+  --danger-light:   #450A0A;
+  --purple:         #A78BFA;
+  --purple-light:   #2E1065;
+  --bg:             #070E1C;
+  --surface:        #0D1829;
+  --card:           #101F34;
+  --card-hover:     #142237;
+  --border:         #1C3050;
+  --divider:        #182840;
+  --text:           #E8F0FF;
+  --text-sec:       #8CA0C0;
+  --text-muted:     #455A78;
+  --text-inv:       #070E1C;
+  --shadow:         rgba(0,0,0,0.5);
+  --shadow-md:      rgba(0,0,0,0.6);
+  --nav-bg:         #0D1829;
+  --input-bg:       #0D1829;
+  --sidebar-bg:     #0D1829;
+  --sidebar-text:   #E8F0FF;
+  --admin-nav:      #0D1829;
+  --seller-nav:     #0D1829;
+  --content-bg:     #070E1C;
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────────────*/
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; font-size: 16px; }
+
+body {
+  font-family: 'Poppins', sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
+  overflow-y: scroll;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+body::-webkit-scrollbar { width: 6px; }
+body::-webkit-scrollbar-track { background: transparent; }
+body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Poppins', sans-serif;
+  color: var(--text);
+  font-weight: 600;
+}
+
+h1 { font-size: 2rem; }
+h2 { font-size: 1.6rem; }
+h3 { font-size: 1.35rem; }
+h4 { font-size: 1.15rem; }
+h5 { font-size: 1rem; }
+h6 { font-size: 0.925rem; }
+
+p { font-size: 0.975rem; color: var(--text-sec); line-height: 1.7; }
+
+a { text-decoration: none; color: var(--primary); }
+a:hover { color: var(--primary-dark); }
+
+li { list-style: none; }
+
+.horizontal-scroll { overflow-x: auto; scrollbar-width: none; }
+.horizontal-scroll::-webkit-scrollbar { display: none; }
+
+/* ── Layout ──────────────────────────────────────────────────────────────────*/
+.page-container { display: flex; flex-direction: column; min-height: 100vh; }
+.page-container main { display: block; flex: 1; padding: 0 20px; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────────*/
+.card {
+  background-color: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  transition: background-color 0.3s, box-shadow 0.2s;
+}
+.card:hover { background-color: var(--card-hover) !important; box-shadow: 0 4px 16px var(--shadow-md) !important; }
+.card-title, .card-text { color: var(--text) !important; }
+.card-text.text-muted { color: var(--text-muted) !important; }
+
+/* ── Form controls ───────────────────────────────────────────────────────────*/
+.form-control, .form-select {
+  background-color: var(--input-bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  font-size: 0.975rem;
+  padding: 0.55rem 0.9rem;
+}
+.form-control::placeholder { color: var(--text-muted) !important; }
+.form-control:focus, .form-select:focus {
+  background-color: var(--input-bg) !important;
+  border-color: var(--primary) !important;
+  color: var(--text) !important;
+  box-shadow: 0 0 0 3px rgba(26,111,232,0.15) !important;
+}
+.form-label { color: var(--text-sec) !important; font-size: 0.9rem; font-weight: 500; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────*/
+.btn-primary, .btn-light-green {
+  background-color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: var(--text-inv) !important;
+  font-weight: 500;
+  font-size: 0.975rem;
+  border-radius: 8px;
+  transition: background-color 0.2s, transform 0.1s;
+}
+.btn-primary:hover, .btn-light-green:hover {
+  background-color: var(--primary-dark) !important;
+  border-color: var(--primary-dark) !important;
+  transform: translateY(-1px);
+}
+
+.btn-outline-violet, .btn-outline-primary {
+  color: var(--primary) !important;
+  border: 1.5px solid var(--primary) !important;
+  background-color: transparent !important;
+  font-weight: 500;
+  border-radius: 8px;
+}
+.btn-outline-violet:hover, .btn-outline-primary:hover {
+  background-color: var(--primary) !important;
+  color: var(--text-inv) !important;
+}
+
+.btn-success {
+  background-color: var(--success) !important;
+  border-color: var(--success) !important;
+  color: #fff !important;
+  border-radius: 8px;
+}
+.btn-success:hover { background-color: #059669 !important; border-color: #059669 !important; }
+
+.btn-danger { border-radius: 8px; }
+
+/* ── Add popup btn — moved to top-right ──────────────────────────────────────*/
+.add-popup-btn {
+  position: fixed;
+  top: 70px;
+  right: 24px;
+  width: 48px;
+  height: 48px;
+  font-size: 24px;
+  font-weight: 700;
+  z-index: 1000;
+  border-radius: 50% !important;
+  background-color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 14px var(--shadow-md);
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: background-color 0.2s, transform 0.2s;
+}
+.add-popup-btn:hover {
+  background-color: var(--primary-dark) !important;
+  border-color: var(--primary-dark) !important;
+  transform: scale(1.08);
+}
+
+/* ── Dark mode toggle button ─────────────────────────────────────────────────*/
+.theme-toggle {
+  background: transparent;
+  border: 1.5px solid rgba(255,255,255,0.35);
+  border-radius: 20px;
+  padding: 4px 10px;
+  color: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.theme-toggle:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.6); }
+
+/* ── Utility ─────────────────────────────────────────────────────────────────*/
+.text-primary   { color: var(--primary) !important; }
+.text-light-green { color: var(--success) !important; }
+.bg-light-green { background-color: var(--success) !important; }
+.text-purple    { color: var(--purple) !important; }
+.bg-purple      { background-color: var(--purple) !important; }
+.text-muted     { color: var(--text-muted) !important; }
+.bg-light       { background-color: var(--surface) !important; }
+
+.fs-7 { font-size: 0.875rem; }
+.cursor-pointer { cursor: pointer; }
+.cursor-grab    { cursor: grab; }
+
+.border-bottom { border-bottom: 1px solid var(--divider) !important; }
+
+.bullet-list li { list-style-type: disc; padding-left: 1.5rem; }
+
+/* ── Table ───────────────────────────────────────────────────────────────────*/
+.table {
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+.table thead th { background-color: var(--primary-light) !important; color: var(--text) !important; font-size: 0.9rem; font-weight: 600; }
+.table tbody tr { background-color: var(--card) !important; }
+.table tbody tr:hover { background-color: var(--card-hover) !important; }
+.table td, .table th { border-color: var(--divider) !important; }
+
+/* ── Badge ───────────────────────────────────────────────────────────────────*/
+.badge { font-size: 0.78rem; font-weight: 500; border-radius: 6px; }
+
+/* ── Modal ───────────────────────────────────────────────────────────────────*/
+.modal-content { background-color: var(--card) !important; color: var(--text) !important; border: 1px solid var(--border) !important; }
+.modal-header, .modal-footer { border-color: var(--divider) !important; }
+
+/* ── Search bar ──────────────────────────────────────────────────────────────*/
+.search-bar {
+  max-width: 600px;
+  margin: 0 auto;
+  border-radius: 50px !important;
+  font-size: 1rem;
+  border: 1.5px solid var(--border) !important;
+  background-color: var(--input-bg) !important;
+  color: var(--text) !important;
+}
+.search-bar:focus { border-color: var(--primary) !important; box-shadow: 0 0 0 3px rgba(26,111,232,0.15) !important; }

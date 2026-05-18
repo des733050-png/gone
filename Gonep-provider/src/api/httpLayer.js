@@ -249,6 +249,16 @@ export function createHttpLayer({ tokenMode = false } = {}) {
     deleteFacilitySpecialty: (id) =>
       apiFetch(ENDPOINTS.facilitySpecialtyDetail(id), { method: 'DELETE' }),
 
+    // Master catalogue (public)
+    getSpecializations: () => apiFetch(ENDPOINTS.specializations),
+    // Specialization requests (facility admin → superadmin)
+    getSpecializationRequests: () => apiFetch(ENDPOINTS.specializationRequests),
+    createSpecializationRequest: (payload) =>
+      apiFetch(ENDPOINTS.specializationRequests, {
+        method: 'POST',
+        body: JSON.stringify(payload || {}),
+      }),
+
     // Booking flow helpers
     getBookingSpecialties: () => apiFetch(ENDPOINTS.bookingSpecialties),
     getBookingDoctors: (specialty) =>

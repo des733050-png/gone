@@ -18,6 +18,7 @@ from django.dispatch import receiver
 from .models import (
     Facility,
     FacilityStatus,
+    ProviderAppointment,
     ProviderMembership,
     ProviderPortalNotification,
     ProviderSubRole,
@@ -202,3 +203,31 @@ def _notify_on_verification_decision(sender, instance, created, **kwargs):
             color=color,
             read=False,
         )
+
+
+# ─── Appointment confirmation email ──────────────────────────────────────────
+
+@receiver(pre_save, sender=ProviderAppointment)
+def _capture_prev_appointment_status(sender, instance, **kwargs):
+    if not instance.pk:
+        instance._prev_appointment_status = None
+        return
+    try:
+        prev = sender.objects.only("status").get(pk=instance.pk)
+        instance._prev_appointment_status = prev.status
+    except sender.DoesNotExist:
+        instance._prev_appointment_status = None
+
+
+@receiver(post_save, sender=ProviderAppointment)
+def _email_on_appointment_confirmed(sender, instance, created, **kwargs):
+    """Send confirmation email to the patient when appointment is confirmed."""
+    if created:
+        return
+    prev = getattr(instance, "_prev_appointment_status", None)
+    if prev == instance.status:
+        return
+    if instance.status != "confirmed":
+        return
+    from .email_utils import send_appointment_confirmation_email
+    send_appointment_confirmation_email(instance)

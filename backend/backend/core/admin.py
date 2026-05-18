@@ -18,6 +18,9 @@ from core.models import (
     AuditEvent,
     CommandBooking,
     CommandIncident,
+    Specialization,
+    SpecializationRequest,
+    SpecializationRequestStatus,
     CommandProvider,
     CommandRider,
     Complaint,
@@ -307,6 +310,41 @@ class ProviderVerificationDocumentInline(admin.TabularInline):
         return False
 
 
+class FacilityVerificationSubmissionInline(admin.TabularInline):
+    """
+    Shows every verification submission for a facility directly on the
+    Facility change page so admins can jump from a facility record straight
+    to its submitted documents without having to navigate to a separate model.
+    """
+    model = ProviderVerificationSubmission
+    extra = 0
+    can_delete = False
+    show_change_link = True          # link to the full ProviderVerificationSubmission page
+    verbose_name        = "Verification submission"
+    verbose_name_plural = "Verification submissions"
+    ordering = ("-created_at",)
+    readonly_fields = (
+        "status",
+        "submitted_by",
+        "reviewed_by",
+        "reviewed_at",
+        "rejection_reason",
+        "created_at",
+        "updated_at",
+    )
+    fields = (
+        "status",
+        "submitted_by",
+        "reviewed_by",
+        "reviewed_at",
+        "rejection_reason",
+        "created_at",
+    )
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 for auth_model in (User, Group):
     try:
         admin.site.unregister(auth_model)
@@ -324,10 +362,107 @@ class GroupAdmin(SuperuserOnlyAdminMixin, BaseGroupAdmin):
     pass
 
 
+@admin.register(Specialization)
+class SpecializationAdmin(SuperuserOnlyAdminMixin, TimeStampedAdminMixin, admin.ModelAdmin):
+    """
+    Platform-wide specialization catalogue.
+    Only superadmins can create, edit, or deactivate specializations.
+    Facility admins can only assign from this list.
+    """
+    list_display  = ("name", "slug", "is_active", "facility_count", "created_at")
+    list_filter   = ("is_active",)
+    search_fields = ("name", "slug")
+    ordering      = ("name",)
+    prepopulated_fields = {"slug": ("name",)}
+    actions = ("activate_specializations", "deactivate_specializations")
+
+    def facility_count(self, obj):
+        return obj.facility_specialties.values("facility").distinct().count()
+    facility_count.short_description = "Facilities using"
+
+    @admin.action(description="Mark selected specializations as active")
+    def activate_specializations(self, request, queryset):
+        updated = queryset.update(is_active=True)
+        self.message_user(request, f"{updated} specialization(s) activated.", messages.SUCCESS)
+
+    @admin.action(description="Deactivate selected specializations")
+    def deactivate_specializations(self, request, queryset):
+        updated = queryset.update(is_active=False)
+        self.message_user(request, f"{updated} specialization(s) deactivated.", messages.WARNING)
+
+
+@admin.register(SpecializationRequest)
+class SpecializationRequestAdmin(SuperuserOnlyAdminMixin, TimeStampedAdminMixin, admin.ModelAdmin):
+    """
+    Facility admin requests for new specializations.
+    Superadmin can approve (creates the Specialization) or reject.
+    """
+    list_display  = ("name", "facility", "requested_by", "status", "specialization", "created_at")
+    list_filter   = ("status",)
+    search_fields = ("name", "facility__name", "requested_by__email")
+    ordering      = ("-created_at",)
+    readonly_fields = (
+        "facility", "requested_by", "name", "reason",
+        "reviewed_by", "specialization", "created_at", "updated_at",
+    )
+    fields = (
+        "facility", "requested_by", "name", "reason",
+        "status", "review_note",
+        "reviewed_by", "specialization",
+        "created_at", "updated_at",
+    )
+    actions = ("approve_requests", "reject_requests")
+
+    @admin.action(description="Approve selected requests (creates Specialization if new)")
+    def approve_requests(self, request, queryset):
+        approved = 0
+        skipped  = 0
+        for req in queryset.filter(status=SpecializationRequestStatus.PENDING):
+            # Find or create the canonical Specialization.
+            spec, _ = Specialization.objects.get_or_create(
+                name=" ".join(req.name.split()).title(),
+                defaults={
+                    "slug": __import__("django.utils.text", fromlist=["slugify"]).slugify(req.name),
+                    "is_active": True,
+                },
+            )
+            req.specialization = spec
+            req.status      = SpecializationRequestStatus.APPROVED
+            req.reviewed_by = request.user
+            req.save(update_fields=["specialization", "status", "reviewed_by", "updated_at"])
+            approved += 1
+        if skipped:
+            self.message_user(request, f"{skipped} request(s) skipped (not PENDING).", messages.WARNING)
+        if approved:
+            self.message_user(request, f"{approved} request(s) approved.", messages.SUCCESS)
+
+    @admin.action(description="Reject selected requests (review_note required)")
+    def reject_requests(self, request, queryset):
+        rejected = 0
+        missing  = 0
+        for req in queryset.filter(status=SpecializationRequestStatus.PENDING):
+            if not req.review_note.strip():
+                missing += 1
+                continue
+            req.status      = SpecializationRequestStatus.REJECTED
+            req.reviewed_by = request.user
+            req.save(update_fields=["status", "reviewed_by", "updated_at"])
+            rejected += 1
+        if missing:
+            self.message_user(
+                request,
+                f"{missing} request(s) not rejected — fill in review_note first.",
+                messages.ERROR,
+            )
+        if rejected:
+            self.message_user(request, f"{rejected} request(s) rejected.", messages.SUCCESS)
+
+
 @admin.register(Facility)
 class FacilityAdmin(CommandCentreModelAdmin):
     required_roles = FACILITY_ADMIN_ONLY
     facility_lookup = "pk"
+    inlines = (FacilityVerificationSubmissionInline,)
 
 
 @admin.register(FacilitySpecialty)

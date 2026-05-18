@@ -96,6 +96,11 @@ export const createFacilitySpecialty  = layer.createFacilitySpecialty;
 export const updateFacilitySpecialty  = layer.updateFacilitySpecialty;
 export const deleteFacilitySpecialty  = layer.deleteFacilitySpecialty;
 
+// Specializations (master catalogue + requests)
+export const getSpecializations         = layer.getSpecializations;
+export const getSpecializationRequests  = layer.getSpecializationRequests;
+export const createSpecializationRequest = layer.createSpecializationRequest;
+
 // Booking flow helpers
 export const getBookingSpecialties    = layer.getBookingSpecialties;
 export const getBookingDoctors        = layer.getBookingDoctors;
